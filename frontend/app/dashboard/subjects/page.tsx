@@ -9,10 +9,10 @@ type Subject = {
   id: number;
   name: string;
   code: string;
-  description?: string | null;
+  description: string | null;
   is_active: boolean;
-  created_at?: string;
-  updated_at?: string;
+  created_at: string;
+  updated_at: string;
 };
 
 type SubjectForm = {
@@ -28,19 +28,25 @@ export default function SubjectsPage() {
   const [loading, setLoading] = useState(true);
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("active");
 
-  const [showForm, setShowForm] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [selectedSubject, setSelectedSubject] =
+    useState<Subject | null>(null);
 
   const [form, setForm] = useState<SubjectForm>({
     name: "",
     code: "",
     description: "",
   });
+
+  const [submitting, setSubmitting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   useEffect(() => {
     const token = localStorage.getItem("access_token");
@@ -53,6 +59,12 @@ export default function SubjectsPage() {
     fetchSubjects();
   }, [router]);
 
+  const logout = () => {
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("user_role");
+    router.push("/login");
+  };
+
   const fetchSubjects = async () => {
     try {
       setLoading(true);
@@ -60,61 +72,149 @@ export default function SubjectsPage() {
 
       const token = localStorage.getItem("access_token");
 
-      const response = await fetch(`${API_URL}/subjects`, {
+      const response = await fetch(`${API_URL}/subjects/`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
 
       if (response.status === 401) {
-        localStorage.removeItem("access_token");
-        localStorage.removeItem("user_role");
-        router.push("/login");
+        logout();
         return;
       }
 
+      const result = await response.json();
+
       if (!response.ok) {
-        throw new Error("Failed to fetch subjects");
+        throw new Error(
+          result?.detail || "Failed to load subjects."
+        );
       }
 
-      const data = await response.json();
-      setSubjects(data);
-    } catch (err) {
+      setSubjects(Array.isArray(result) ? result : []);
+    } catch (err: any) {
       console.error(err);
-      setError("Failed to load subjects.");
+      setError(err.message || "Failed to load subjects.");
     } finally {
       setLoading(false);
     }
   };
 
-  const activeSubjects = subjects.filter(
-    (subject) => subject.is_active
-  ).length;
+  const fetchSubjectById = async (id: number) => {
+    const token = localStorage.getItem("access_token");
 
-  const inactiveSubjects = subjects.filter(
-    (subject) => !subject.is_active
-  ).length;
+    const response = await fetch(
+      `${API_URL}/subjects/${id}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (response.status === 401) {
+      logout();
+      return null;
+    }
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        result?.detail || "Failed to load subject."
+      );
+    }
+
+    return result as Subject;
+  };
 
   const filteredSubjects = useMemo(() => {
     const query = search.trim().toLowerCase();
 
+    if (!query) return subjects;
+
     return subjects.filter((subject) => {
-      const matchesSearch =
-        !query ||
+      return (
         subject.name.toLowerCase().includes(query) ||
         subject.code.toLowerCase().includes(query) ||
         (subject.description ?? "")
           .toLowerCase()
-          .includes(query);
-
-      const matchesStatus =
-        statusFilter === "all" ||
-        (statusFilter === "active" && subject.is_active) ||
-        (statusFilter === "inactive" && !subject.is_active);
-
-      return matchesSearch && matchesStatus;
+          .includes(query) ||
+        String(subject.id).includes(query)
+      );
     });
-  }, [subjects, search, statusFilter]);
+  }, [subjects, search]);
+
+  const resetForm = () => {
+    setForm({
+      name: "",
+      code: "",
+      description: "",
+    });
+  };
+
+  const openAddModal = () => {
+    setError("");
+    setSuccess("");
+    resetForm();
+    setShowAddModal(true);
+  };
+
+  const closeAddModal = () => {
+    if (submitting) return;
+
+    setShowAddModal(false);
+    resetForm();
+  };
+
+  const openEditModal = async (subject: Subject) => {
+    setError("");
+    setSuccess("");
+    setSelectedSubject(subject);
+
+    try {
+      const latest = await fetchSubjectById(subject.id);
+
+      if (!latest) return;
+
+      setSelectedSubject(latest);
+
+      setForm({
+        name: latest.name,
+        code: latest.code,
+        description: latest.description ?? "",
+      });
+
+      setShowEditModal(true);
+    } catch (err: any) {
+      console.error(err);
+      setError(
+        err.message || "Failed to load subject details."
+      );
+    }
+  };
+
+  const closeEditModal = () => {
+    if (submitting) return;
+
+    setShowEditModal(false);
+    setSelectedSubject(null);
+    resetForm();
+  };
+
+  const openDeleteModal = (subject: Subject) => {
+    setError("");
+    setSuccess("");
+    setSelectedSubject(subject);
+    setShowDeleteModal(true);
+  };
+
+  const closeDeleteModal = () => {
+    if (deleting) return;
+
+    setShowDeleteModal(false);
+    setSelectedSubject(null);
+  };
 
   const handleInput = (
     field: keyof SubjectForm,
@@ -126,15 +226,7 @@ export default function SubjectsPage() {
     }));
   };
 
-  const resetForm = () => {
-    setForm({
-      name: "",
-      code: "",
-      description: "",
-    });
-  };
-
-  const handleSubmit = async (
+  const handleCreate = async (
     event: FormEvent<HTMLFormElement>
   ) => {
     event.preventDefault();
@@ -146,23 +238,21 @@ export default function SubjectsPage() {
     try {
       const token = localStorage.getItem("access_token");
 
-      const response = await fetch(`${API_URL}/subjects`, {
+      const response = await fetch(`${API_URL}/subjects/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          name: form.name,
-          code: form.code.toUpperCase(),
-          description: form.description || null,
+          name: form.name.trim(),
+          code: form.code.trim().toUpperCase(),
+          description: form.description.trim() || null,
         }),
       });
 
       if (response.status === 401) {
-        localStorage.removeItem("access_token");
-        localStorage.removeItem("user_role");
-        router.push("/login");
+        logout();
         return;
       }
 
@@ -170,20 +260,132 @@ export default function SubjectsPage() {
 
       if (!response.ok) {
         throw new Error(
-          result?.detail || "Failed to create subject"
+          result?.detail || "Failed to create subject."
         );
       }
 
-      setSuccess("Subject added successfully.");
+      setSuccess("Subject created successfully.");
+      setShowAddModal(false);
       resetForm();
-      setShowForm(false);
 
       await fetchSubjects();
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Failed to add subject.");
+      setError(
+        err.message || "Failed to create subject."
+      );
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleUpdate = async (
+    event: FormEvent<HTMLFormElement>
+  ) => {
+    event.preventDefault();
+
+    if (!selectedSubject) return;
+
+    setSubmitting(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const token = localStorage.getItem("access_token");
+
+      const response = await fetch(
+        `${API_URL}/subjects/${selectedSubject.id}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            name: form.name.trim(),
+            code: form.code.trim().toUpperCase(),
+            description: form.description.trim() || null,
+          }),
+        }
+      );
+
+      if (response.status === 401) {
+        logout();
+        return;
+      }
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result?.detail || "Failed to update subject."
+        );
+      }
+
+      setSuccess("Subject updated successfully.");
+      setShowEditModal(false);
+      setSelectedSubject(null);
+      resetForm();
+
+      await fetchSubjects();
+    } catch (err: any) {
+      console.error(err);
+      setError(
+        err.message || "Failed to update subject."
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!selectedSubject) return;
+
+    setDeleting(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const token = localStorage.getItem("access_token");
+
+      const response = await fetch(
+        `${API_URL}/subjects/${selectedSubject.id}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (response.status === 401) {
+        logout();
+        return;
+      }
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result?.detail || "Failed to deactivate subject."
+        );
+      }
+
+      setSuccess(
+        `${selectedSubject.name} has been deactivated successfully.`
+      );
+
+      setShowDeleteModal(false);
+      setSelectedSubject(null);
+
+      await fetchSubjects();
+    } catch (err: any) {
+      console.error(err);
+      setError(
+        err.message || "Failed to deactivate subject."
+      );
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -191,9 +393,9 @@ export default function SubjectsPage() {
     <div className="min-h-screen bg-[#f5f7fb] text-slate-900">
       {/* HEADER */}
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <div className="flex min-h-[76px] items-center justify-between px-6 py-4 lg:px-8">
+        <div className="flex min-h-[76px] flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between lg:px-8">
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#315b9b]">
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#315b9b]">
               EduOS · Academic Management
             </p>
 
@@ -207,12 +409,8 @@ export default function SubjectsPage() {
           </div>
 
           <button
-            onClick={() => {
-              setError("");
-              setSuccess("");
-              setShowForm(true);
-            }}
-            className="flex items-center gap-2 rounded-xl bg-[#102a56] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#183d73]"
+            onClick={openAddModal}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#102a56] px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#183d73] sm:w-auto"
           >
             <span className="text-lg leading-none">+</span>
             Add Subject
@@ -220,7 +418,7 @@ export default function SubjectsPage() {
         </div>
       </header>
 
-      <main className="px-6 py-7 lg:px-8">
+      <main className="px-4 py-6 sm:px-6 lg:px-8 lg:py-7">
         <div className="mx-auto max-w-[1500px]">
           {/* BREADCRUMB */}
           <div className="mb-6 flex items-center gap-2 text-xs text-slate-400">
@@ -240,59 +438,49 @@ export default function SubjectsPage() {
 
           {/* SUCCESS */}
           {success && (
-            <div className="mb-5 flex items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-medium text-emerald-700">
-              <span>{success}</span>
-
-              <button
-                onClick={() => setSuccess("")}
-                className="text-emerald-500 hover:text-emerald-700"
-              >
-                ×
-              </button>
-            </div>
+            <Alert
+              type="success"
+              message={success}
+              onClose={() => setSuccess("")}
+            />
           )}
 
           {/* ERROR */}
           {error && (
-            <div className="mb-5 flex items-center justify-between rounded-2xl border border-red-200 bg-red-50 px-5 py-3 text-sm font-medium text-red-700">
-              <span>{error}</span>
-
-              <button
-                onClick={() => setError("")}
-                className="text-red-500 hover:text-red-700"
-              >
-                ×
-              </button>
-            </div>
+            <Alert
+              type="error"
+              message={error}
+              onClose={() => setError("")}
+            />
           )}
 
-          {/* OVERVIEW */}
+          {/* STATS */}
           <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <OverviewCard
-              title="Total Subjects"
+            <StatCard
+              title="Active Subjects"
               value={subjects.length}
-              description="All subject records"
+              description="Currently available"
               icon="◆"
             />
 
-            <OverviewCard
-              title="Active Subjects"
-              value={activeSubjects}
-              description="Currently active"
-              icon="✓"
+            <StatCard
+              title="Search Results"
+              value={filteredSubjects.length}
+              description="Matching current search"
+              icon="⌕"
               green
             />
 
-            <OverviewCard
-              title="Inactive Subjects"
-              value={inactiveSubjects}
-              description="Inactive subject records"
-              icon="—"
-              red
+            <StatCard
+              title="Catalog Status"
+              value={subjects.length > 0 ? "Ready" : "Empty"}
+              description="Academic catalog"
+              icon="✓"
+              blue
             />
           </section>
 
-          {/* SUBJECT DIRECTORY */}
+          {/* DIRECTORY */}
           <section className="mt-7 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-200 p-5 lg:p-6">
               <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
@@ -306,40 +494,24 @@ export default function SubjectsPage() {
                   </h2>
 
                   <p className="mt-1 text-sm text-slate-500">
-                    View and manage all available subjects.
+                    View and manage all active subjects.
                   </p>
                 </div>
 
-                <div className="flex flex-col gap-3 sm:flex-row">
-                  {/* SEARCH */}
-                  <div className="relative">
-                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-                      ⌕
-                    </span>
+                <div className="relative">
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                    ⌕
+                  </span>
 
-                    <input
-                      type="text"
-                      value={search}
-                      onChange={(event) =>
-                        setSearch(event.target.value)
-                      }
-                      placeholder="Search subjects..."
-                      className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-4 text-sm outline-none transition focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100 sm:w-64"
-                    />
-                  </div>
-
-                  {/* STATUS */}
-                  <select
-                    value={statusFilter}
+                  <input
+                    type="text"
+                    value={search}
                     onChange={(event) =>
-                      setStatusFilter(event.target.value)
+                      setSearch(event.target.value)
                     }
-                    className="h-11 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-600 outline-none focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
-                  >
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                    <option value="all">All Status</option>
-                  </select>
+                    placeholder="Search subjects..."
+                    className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-4 text-sm outline-none transition focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100 sm:w-72"
+                  />
                 </div>
               </div>
             </div>
@@ -350,11 +522,11 @@ export default function SubjectsPage() {
                 <LoadingTable />
               ) : filteredSubjects.length === 0 ? (
                 <EmptyState
-                  search={search}
-                  onAdd={() => setShowForm(true)}
+                  hasSearch={Boolean(search.trim())}
+                  onAdd={openAddModal}
                 />
               ) : (
-                <table className="min-w-[900px] w-full">
+                <table className="min-w-[1050px] w-full">
                   <thead>
                     <tr className="border-b border-slate-100 bg-slate-50/80 text-left">
                       <th className="px-6 py-4 text-[11px] font-bold uppercase tracking-wider text-slate-400">
@@ -378,7 +550,7 @@ export default function SubjectsPage() {
                       </th>
 
                       <th className="px-6 py-4 text-right text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                        Record
+                        Actions
                       </th>
                     </tr>
                   </thead>
@@ -397,7 +569,6 @@ export default function SubjectsPage() {
                           key={subject.id}
                           className="group border-b border-slate-100 transition hover:bg-blue-50/30"
                         >
-                          {/* SUBJECT */}
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-3">
                               <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#102a56] text-xs font-bold text-white">
@@ -410,20 +581,18 @@ export default function SubjectsPage() {
                                 </p>
 
                                 <p className="mt-0.5 text-xs text-slate-400">
-                                  Subject ID #{subject.id}
+                                  Subject #{subject.id}
                                 </p>
                               </div>
                             </div>
                           </td>
 
-                          {/* CODE */}
                           <td className="px-6 py-4">
                             <span className="rounded-lg bg-blue-50 px-2.5 py-1.5 text-xs font-bold tracking-wide text-blue-700">
                               {subject.code}
                             </span>
                           </td>
 
-                          {/* DESCRIPTION */}
                           <td className="max-w-[360px] px-6 py-4">
                             <p className="truncate text-sm text-slate-600">
                               {subject.description ||
@@ -431,50 +600,43 @@ export default function SubjectsPage() {
                             </p>
                           </td>
 
-                          {/* STATUS */}
                           <td className="px-6 py-4">
-                            {subject.is_active ? (
-                              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
-                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                                Active
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-500">
-                                <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
-                                Inactive
-                              </span>
-                            )}
-                          </td>
-
-                          {/* CREATED */}
-                          <td className="px-6 py-4">
-                            <div>
-                              <p className="text-sm font-medium text-slate-600">
-                                {subject.created_at
-                                  ? new Date(
-                                      subject.created_at
-                                    ).toLocaleDateString(
-                                      "en-IN",
-                                      {
-                                        day: "2-digit",
-                                        month: "short",
-                                        year: "numeric",
-                                      }
-                                    )
-                                  : "—"}
-                              </p>
-
-                              <p className="mt-1 text-xs text-slate-400">
-                                Created date
-                              </p>
-                            </div>
-                          </td>
-
-                          {/* ID */}
-                          <td className="px-6 py-4 text-right">
-                            <span className="text-xs font-medium text-slate-400">
-                              #{subject.id}
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                              Active
                             </span>
+                          </td>
+
+                          <td className="px-6 py-4">
+                            <p className="text-sm font-medium text-slate-600">
+                              {formatDate(subject.created_at)}
+                            </p>
+
+                            <p className="mt-1 text-xs text-slate-400">
+                              Created
+                            </p>
+                          </td>
+
+                          <td className="px-6 py-4">
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() =>
+                                  openEditModal(subject)
+                                }
+                                className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
+                              >
+                                ✎ Edit
+                              </button>
+
+                              <button
+                                onClick={() =>
+                                  openDeleteModal(subject)
+                                }
+                                className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-100"
+                              >
+                                🗑 Deactivate
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -484,7 +646,6 @@ export default function SubjectsPage() {
               )}
             </div>
 
-            {/* FOOTER */}
             {!loading && filteredSubjects.length > 0 && (
               <div className="flex flex-col gap-2 border-t border-slate-100 bg-slate-50/50 px-6 py-4 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
                 <span>
@@ -496,7 +657,7 @@ export default function SubjectsPage() {
                   <strong className="text-slate-600">
                     {subjects.length}
                   </strong>{" "}
-                  subjects
+                  active subjects
                 </span>
 
                 <span>EduOS Academic Catalog</span>
@@ -506,128 +667,113 @@ export default function SubjectsPage() {
         </div>
       </main>
 
-      {/* ADD SUBJECT MODAL */}
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-xl overflow-hidden rounded-3xl bg-white shadow-2xl">
-            {/* MODAL HEADER */}
-            <div className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-5">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#315b9b]">
-                  Academic Catalog
-                </p>
+      {/* ADD MODAL */}
+      {showAddModal && (
+        <SubjectModal
+          title="Add New Subject"
+          description="Create a subject for your academic structure."
+          form={form}
+          setForm={setForm}
+          submitting={submitting}
+          submitText="Create Subject"
+          loadingText="Creating Subject..."
+          onClose={closeAddModal}
+          onSubmit={handleCreate}
+        />
+      )}
 
-                <h2 className="mt-1 text-xl font-bold text-[#102a56]">
-                  Add New Subject
-                </h2>
+      {/* EDIT MODAL */}
+      {showEditModal && selectedSubject && (
+        <SubjectModal
+          title="Edit Subject"
+          description={`Update ${selectedSubject.name}'s academic information.`}
+          form={form}
+          setForm={setForm}
+          submitting={submitting}
+          submitText="Save Changes"
+          loadingText="Saving Changes..."
+          onClose={closeEditModal}
+          onSubmit={handleUpdate}
+          editMode
+          subjectId={selectedSubject.id}
+        />
+      )}
 
-                <p className="mt-1 text-xs text-slate-400">
-                  Create a subject for your academic structure.
-                </p>
+      {/* DELETE MODAL */}
+      {showDeleteModal && selectedSubject && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl bg-white shadow-2xl">
+            <div className="p-6">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 text-xl">
+                🗑
               </div>
 
-              <button
-                onClick={() => {
-                  setShowForm(false);
-                  resetForm();
-                }}
-                className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition hover:bg-slate-200"
-              >
-                ×
-              </button>
+              <h2 className="mt-5 text-xl font-bold text-[#102a56]">
+                Deactivate Subject?
+              </h2>
+
+              <p className="mt-2 text-sm leading-6 text-slate-500">
+                Are you sure you want to deactivate{" "}
+                <strong className="text-slate-700">
+                  {selectedSubject.name}
+                </strong>
+                ?
+              </p>
+
+              <div className="mt-5 rounded-2xl border border-red-100 bg-red-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-red-500">
+                  Subject Record
+                </p>
+
+                <div className="mt-3 grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-xs text-red-400">
+                      Subject ID
+                    </p>
+
+                    <p className="mt-1 font-semibold text-red-700">
+                      #{selectedSubject.id}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-red-400">
+                      Code
+                    </p>
+
+                    <p className="mt-1 font-semibold text-red-700">
+                      {selectedSubject.code}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <p className="mt-4 text-xs leading-5 text-slate-400">
+                The backend DELETE operation deactivates the
+                subject rather than permanently removing its
+                database record.
+              </p>
             </div>
 
-            {/* FORM */}
-            <form
-              onSubmit={handleSubmit}
-              className="space-y-5 p-6"
-            >
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold text-slate-600">
-                  Subject Name
-                  <span className="ml-1 text-red-500">*</span>
-                </label>
+            <div className="flex flex-col-reverse gap-3 border-t border-slate-100 p-5 sm:flex-row sm:justify-end">
+              <button
+                onClick={closeDeleteModal}
+                disabled={deleting}
+                className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
 
-                <input
-                  type="text"
-                  required
-                  value={form.name}
-                  onChange={(event) =>
-                    handleInput("name", event.target.value)
-                  }
-                  placeholder="e.g. Mathematics"
-                  className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold text-slate-600">
-                  Subject Code
-                  <span className="ml-1 text-red-500">*</span>
-                </label>
-
-                <input
-                  type="text"
-                  required
-                  value={form.code}
-                  onChange={(event) =>
-                    handleInput(
-                      "code",
-                      event.target.value.toUpperCase()
-                    )
-                  }
-                  placeholder="e.g. MATH"
-                  className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-medium tracking-wide text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
-                />
-
-                <p className="mt-1.5 text-[11px] text-slate-400">
-                  Use a short unique code such as MATH, SCI, ENG.
-                </p>
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold text-slate-600">
-                  Description
-                </label>
-
-                <textarea
-                  rows={4}
-                  value={form.description}
-                  onChange={(event) =>
-                    handleInput(
-                      "description",
-                      event.target.value
-                    )
-                  }
-                  placeholder="e.g. Mathematics subject"
-                  className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
-                />
-              </div>
-
-              {/* ACTIONS */}
-              <div className="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowForm(false);
-                    resetForm();
-                  }}
-                  className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="rounded-xl bg-[#102a56] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#183d73] disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {submitting
-                    ? "Creating Subject..."
-                    : "Create Subject"}
-                </button>
-              </div>
-            </form>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="rounded-xl bg-red-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {deleting
+                  ? "Deactivating..."
+                  : "Yes, Deactivate"}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -636,23 +782,220 @@ export default function SubjectsPage() {
 }
 
 /* =========================================================
-   OVERVIEW CARD
+   SUBJECT MODAL
 ========================================================= */
 
-function OverviewCard({
+function SubjectModal({
+  title,
+  description,
+  form,
+  setForm,
+  submitting,
+  submitText,
+  loadingText,
+  onClose,
+  onSubmit,
+  editMode = false,
+  subjectId,
+}: {
+  title: string;
+  description: string;
+  form: SubjectForm;
+  setForm: React.Dispatch<React.SetStateAction<SubjectForm>>;
+  submitting: boolean;
+  submitText: string;
+  loadingText: string;
+  onClose: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  editMode?: boolean;
+  subjectId?: number;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#315b9b]">
+              Academic Catalog
+            </p>
+
+            <h2 className="mt-1 text-xl font-bold text-[#102a56]">
+              {title}
+            </h2>
+
+            <p className="mt-1 text-xs leading-5 text-slate-400">
+              {description}
+            </p>
+
+            {editMode && subjectId && (
+              <p className="mt-2 text-[11px] font-semibold text-slate-400">
+                Subject ID #{subjectId}
+              </p>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition hover:bg-slate-200"
+          >
+            ×
+          </button>
+        </div>
+
+        <form
+          onSubmit={onSubmit}
+          className="space-y-5 p-6"
+        >
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold text-slate-600">
+              Subject Name
+              <span className="ml-1 text-red-500">*</span>
+            </label>
+
+            <input
+              type="text"
+              required
+              value={form.name}
+              onChange={(event) =>
+                setForm((previous) => ({
+                  ...previous,
+                  name: event.target.value,
+                }))
+              }
+              placeholder="e.g. Mathematics"
+              className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold text-slate-600">
+              Subject Code
+              <span className="ml-1 text-red-500">*</span>
+            </label>
+
+            <input
+              type="text"
+              required
+              value={form.code}
+              onChange={(event) =>
+                setForm((previous) => ({
+                  ...previous,
+                  code: event.target.value.toUpperCase(),
+                }))
+              }
+              placeholder="e.g. MATH"
+              className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-medium tracking-wide text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
+            />
+
+            <p className="mt-1.5 text-[11px] text-slate-400">
+              Use a short unique code such as MATH, SCI or ENG.
+            </p>
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold text-slate-600">
+              Description
+            </label>
+
+            <textarea
+              rows={4}
+              value={form.description}
+              onChange={(event) =>
+                setForm((previous) => ({
+                  ...previous,
+                  description: event.target.value,
+                }))
+              }
+              placeholder="e.g. Mathematics subject"
+              className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
+            />
+          </div>
+
+          <div className="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={submitting}
+              className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="rounded-xl bg-[#102a56] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#183d73] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {submitting ? loadingText : submitText}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   ALERT
+========================================================= */
+
+function Alert({
+  type,
+  message,
+  onClose,
+}: {
+  type: "success" | "error";
+  message: string;
+  onClose: () => void;
+}) {
+  const success = type === "success";
+
+  return (
+    <div
+      className={`mb-5 flex items-center justify-between gap-4 rounded-2xl border px-4 py-3 text-sm font-medium sm:px-5 ${
+        success
+          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+          : "border-red-200 bg-red-50 text-red-700"
+      }`}
+    >
+      <span>{message}</span>
+
+      <button
+        onClick={onClose}
+        className="shrink-0 text-lg opacity-70 transition hover:opacity-100"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+/* =========================================================
+   STAT CARD
+========================================================= */
+
+function StatCard({
   title,
   value,
   description,
   icon,
   green = false,
-  red = false,
+  blue = false,
 }: {
   title: string;
-  value: number;
+  value: number | string;
   description: string;
   icon: string;
   green?: boolean;
-  red?: boolean;
+  blue?: boolean;
 }) {
   let iconClass = "bg-slate-100 text-slate-700";
 
@@ -660,8 +1003,8 @@ function OverviewCard({
     iconClass = "bg-emerald-50 text-emerald-700";
   }
 
-  if (red) {
-    iconClass = "bg-red-50 text-red-700";
+  if (blue) {
+    iconClass = "bg-blue-50 text-blue-700";
   }
 
   return (
@@ -700,7 +1043,7 @@ function OverviewCard({
 function LoadingTable() {
   return (
     <div className="space-y-4 p-6">
-      {[1, 2, 3, 4].map((item) => (
+      {[1, 2, 3, 4, 5].map((item) => (
         <div
           key={item}
           className="flex animate-pulse items-center gap-4"
@@ -708,13 +1051,13 @@ function LoadingTable() {
           <div className="h-11 w-11 rounded-xl bg-slate-200" />
 
           <div className="flex-1 space-y-2">
-            <div className="h-3 w-40 rounded bg-slate-200" />
-            <div className="h-2 w-28 rounded bg-slate-100" />
+            <div className="h-3 w-48 rounded bg-slate-200" />
+            <div className="h-2 w-32 rounded bg-slate-100" />
           </div>
 
-          <div className="hidden h-8 w-20 rounded bg-slate-100 md:block" />
+          <div className="hidden h-8 w-24 rounded bg-slate-100 md:block" />
 
-          <div className="h-8 w-20 rounded bg-slate-100" />
+          <div className="h-8 w-32 rounded bg-slate-100" />
         </div>
       ))}
     </div>
@@ -726,29 +1069,31 @@ function LoadingTable() {
 ========================================================= */
 
 function EmptyState({
-  search,
+  hasSearch,
   onAdd,
 }: {
-  search: string;
+  hasSearch: boolean;
   onAdd: () => void;
 }) {
   return (
     <div className="flex flex-col items-center justify-center px-6 py-20 text-center">
-      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-2xl text-[#102a56]">
+      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-2xl">
         ◆
       </div>
 
       <h3 className="mt-5 text-lg font-bold text-[#102a56]">
-        {search ? "No subjects found" : "No subjects yet"}
+        {hasSearch
+          ? "No matching subjects"
+          : "No subjects found"}
       </h3>
 
-      <p className="mt-2 max-w-sm text-sm leading-6 text-slate-500">
-        {search
-          ? "Try changing your search or status filter."
-          : "Start building your academic catalog by adding the first subject."}
+      <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
+        {hasSearch
+          ? "Try another search term."
+          : "Create your first academic subject to populate the catalog."}
       </p>
 
-      {!search && (
+      {!hasSearch && (
         <button
           onClick={onAdd}
           className="mt-5 rounded-xl bg-[#102a56] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#183d73]"
@@ -758,4 +1103,24 @@ function EmptyState({
       )}
     </div>
   );
+}
+
+/* =========================================================
+   DATE FORMAT
+========================================================= */
+
+function formatDate(value?: string) {
+  if (!value) return "—";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "—";
+  }
+
+  return date.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }

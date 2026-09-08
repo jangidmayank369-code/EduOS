@@ -34,6 +34,11 @@ const menuItems = [
     icon: "◇",
   },
   {
+    label: "Teacher Assignments",
+    path: "/dashboard/teacher-assignments",
+    icon: "◆",
+  },
+  {
     label: "Attendance",
     path: "/dashboard/attendance",
     icon: "✓",
@@ -69,17 +74,35 @@ export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
 
+  const handleNavigation = (path: string) => {
+    router.push(path);
+  };
+
   const handleLogout = () => {
     localStorage.removeItem("access_token");
     localStorage.removeItem("user_role");
     router.push("/login");
   };
 
+  const isActive = (path: string) => {
+    if (path === "/dashboard") {
+      return pathname === "/dashboard";
+    }
+
+    return (
+      pathname === path ||
+      pathname.startsWith(`${path}/`)
+    );
+  };
+
   return (
     <aside className="sticky top-0 flex h-screen w-[250px] shrink-0 flex-col border-r border-slate-200 bg-white">
       {/* Logo */}
       <div className="border-b border-slate-100 px-6 py-6">
-        <div className="flex items-center gap-3">
+        <button
+          onClick={() => router.push("/dashboard")}
+          className="flex w-full items-center gap-3 text-left"
+        >
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#102A56] text-lg font-bold text-white shadow-lg shadow-blue-900/20">
             E
           </div>
@@ -93,7 +116,7 @@ export default function Sidebar() {
               Intelligence Platform
             </p>
           </div>
-        </div>
+        </button>
       </div>
 
       {/* Navigation */}
@@ -104,27 +127,28 @@ export default function Sidebar() {
 
         <nav className="space-y-1">
           {menuItems.map((item) => {
-            const active =
-              item.path === "/dashboard"
-                ? pathname === "/dashboard"
-                : pathname.startsWith(item.path);
+            const active = isActive(item.path);
 
             return (
               <button
                 key={item.path}
-                onClick={() => router.push(item.path)}
-                className={`group relative flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium transition-all ${
+                onClick={() =>
+                  handleNavigation(item.path)
+                }
+                className={`group relative flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium transition-all duration-200 ${
                   active
-                    ? "bg-[#102A56] text-white shadow-md shadow-blue-900/15"
+                    ? "bg-[#102A56] text-white shadow-md shadow-blue-900/20"
                     : "text-slate-600 hover:bg-slate-50 hover:text-[#102A56]"
                 }`}
               >
+                {/* Active indicator */}
                 {active && (
-                  <span className="absolute left-0 h-6 w-1 rounded-r-full bg-blue-400" />
+                  <span className="absolute left-0 top-1/2 h-7 w-1 -translate-y-1/2 rounded-r-full bg-blue-400" />
                 )}
 
+                {/* Icon */}
                 <span
-                  className={`flex h-8 w-8 items-center justify-center rounded-lg text-sm ${
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm transition-all ${
                     active
                       ? "bg-white/10 text-white"
                       : "bg-slate-100 text-[#102A56] group-hover:bg-blue-50"
@@ -133,22 +157,28 @@ export default function Sidebar() {
                   {item.icon}
                 </span>
 
-                <span>{item.label}</span>
+                {/* Label */}
+                <span className="truncate">
+                  {item.label}
+                </span>
               </button>
             );
           })}
         </nav>
       </div>
 
-      {/* System status */}
+      {/* Bottom section */}
       <div className="border-t border-slate-100 px-4 py-4">
+        {/* System status */}
         <div className="mb-3 flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2">
           <span className="h-2 w-2 rounded-full bg-emerald-500" />
+
           <span className="text-xs font-medium text-emerald-700">
             EduOS systems operational
           </span>
         </div>
 
+        {/* Logout */}
         <button
           onClick={handleLogout}
           className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium text-red-500 transition hover:bg-red-50"
@@ -156,6 +186,7 @@ export default function Sidebar() {
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-50">
             ↪
           </span>
+
           Logout
         </button>
       </div>

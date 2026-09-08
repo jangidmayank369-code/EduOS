@@ -29,6 +29,7 @@ type Student = {
   } | null;
   is_active: boolean;
   created_at?: string;
+  updated_at?: string;
 };
 
 type StudentForm = {
@@ -43,35 +44,39 @@ type StudentForm = {
   class_id: string;
 };
 
+const emptyForm: StudentForm = {
+  admission_number: "",
+  first_name: "",
+  last_name: "",
+  date_of_birth: "",
+  gender: "",
+  email: "",
+  phone: "",
+  address: "",
+  class_id: "",
+};
+
 export default function StudentsPage() {
   const router = useRouter();
 
   const [students, setStudents] = useState<Student[]>([]);
   const [classes, setClasses] = useState<SchoolClass[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [classesLoading, setClassesLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const [search, setSearch] = useState("");
   const [classFilter, setClassFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("active");
 
   const [showForm, setShowForm] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const [editingStudent, setEditingStudent] = useState<Student | null>(null);
+
+  const [form, setForm] = useState<StudentForm>(emptyForm);
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-
-  const [form, setForm] = useState<StudentForm>({
-    admission_number: "",
-    first_name: "",
-    last_name: "",
-    date_of_birth: "",
-    gender: "",
-    email: "",
-    phone: "",
-    address: "",
-    class_id: "",
-  });
 
   useEffect(() => {
     const token = localStorage.getItem("access_token");
@@ -81,39 +86,81 @@ export default function StudentsPage() {
       return;
     }
 
-    fetchStudents();
-    fetchClasses();
+    void Promise.all([fetchStudents(), fetchClasses()]);
   }, [router]);
+
+  const logout = () => {
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("user_role");
+    router.push("/login");
+  };
+
+  const apiRequest = async (
+    path: string,
+    options: RequestInit = {}
+  ): Promise<Response> => {
+    const token = localStorage.getItem("access_token");
+
+    const response = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers: {
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(options.headers || {}),
+      },
+    });
+
+    if (response.status === 401) {
+      logout();
+      throw new Error("Your session has expired. Please login again.");
+    }
+
+    return response;
+  };
+
+  const readError = async (response: Response, fallback: string) => {
+    try {
+      const data = await response.json();
+
+      if (typeof data?.detail === "string") {
+        return data.detail;
+      }
+
+      if (Array.isArray(data?.detail)) {
+        return data.detail
+          .map((item: { msg?: string }) => item.msg || "Invalid data")
+          .join(", ");
+      }
+
+      return fallback;
+    } catch {
+      return fallback;
+    }
+  };
 
   const fetchStudents = async () => {
     try {
       setLoading(true);
       setError("");
 
-      const token = localStorage.getItem("access_token");
-
-      const response = await fetch(`${API_URL}/students`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (response.status === 401) {
-        localStorage.removeItem("access_token");
-        localStorage.removeItem("user_role");
-        router.push("/login");
-        return;
-      }
+      const response = await apiRequest("/students/");
 
       if (!response.ok) {
-        throw new Error("Failed to fetch students");
+        throw new Error(
+          await readError(response, "Failed to load students.")
+        );
       }
 
-      const data = await response.json();
+      const data: Student[] = await response.json();
       setStudents(data);
     } catch (err) {
       console.error(err);
-      setError("Failed to load students.");
+
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Failed to load students.");
+      }
     } finally {
       setLoading(false);
     }
@@ -123,23 +170,24 @@ export default function StudentsPage() {
     try {
       setClassesLoading(true);
 
-      const token = localStorage.getItem("access_token");
-
-      const response = await fetch(`${API_URL}/classes`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const response = await apiRequest("/classes/");
 
       if (!response.ok) {
-        throw new Error("Failed to fetch classes");
+        throw new Error(
+          await readError(response, "Failed to load classes.")
+        );
       }
 
-      const data = await response.json();
+      const data: SchoolClass[] = await response.json();
       setClasses(data);
     } catch (err) {
       console.error(err);
-      setError("Failed to load classes.");
+
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Failed to load classes.");
+      }
     } finally {
       setClassesLoading(false);
     }
@@ -163,22 +211,64 @@ export default function StudentsPage() {
         classFilter === "all" ||
         String(student.class_id ?? "") === classFilter;
 
-      const matchesStatus =
-        statusFilter === "all" ||
-        (statusFilter === "active" && student.is_active) ||
-        (statusFilter === "inactive" && !student.is_active);
-
-      return matchesSearch && matchesClass && matchesStatus;
+      return matchesSearch && matchesClass;
     });
-  }, [students, search, classFilter, statusFilter]);
+  }, [students, search, classFilter]);
 
   const activeStudents = students.filter(
     (student) => student.is_active
   ).length;
 
-  const assignedStudents = students.filter(
-    (student) => student.class_id
+  const inactiveStudents = students.filter(
+    (student) => !student.is_active
   ).length;
+
+  const assignedStudents = students.filter(
+    (student) => student.class_id !== null && student.class_id !== undefined
+  ).length;
+
+  const resetForm = () => {
+    setForm({ ...emptyForm });
+  };
+
+  const closeForm = () => {
+    setShowForm(false);
+    setEditingStudent(null);
+    resetForm();
+  };
+
+  const openAddForm = () => {
+    setError("");
+    setSuccess("");
+    setEditingStudent(null);
+    resetForm();
+    setShowForm(true);
+  };
+
+  const openEditForm = (student: Student) => {
+    setError("");
+    setSuccess("");
+    setEditingStudent(student);
+
+    setForm({
+      admission_number: student.admission_number,
+      first_name: student.first_name,
+      last_name: student.last_name,
+      date_of_birth: student.date_of_birth
+        ? student.date_of_birth.slice(0, 10)
+        : "",
+      gender: student.gender ?? "",
+      email: student.email ?? "",
+      phone: student.phone ?? "",
+      address: student.address ?? "",
+      class_id:
+        student.class_id !== null && student.class_id !== undefined
+          ? String(student.class_id)
+          : "",
+    });
+
+    setShowForm(true);
+  };
 
   const handleInput = (
     field: keyof StudentForm,
@@ -190,116 +280,193 @@ export default function StudentsPage() {
     }));
   };
 
-  const resetForm = () => {
-    setForm({
-      admission_number: "",
-      first_name: "",
-      last_name: "",
-      date_of_birth: "",
-      gender: "",
-      email: "",
-      phone: "",
-      address: "",
-      class_id: "",
-    });
+  const validateForm = () => {
+    if (!form.first_name.trim()) {
+      return "First name is required.";
+    }
+
+    if (!form.last_name.trim()) {
+      return "Last name is required.";
+    }
+
+    if (form.email.trim()) {
+      const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+      if (!emailPattern.test(form.email.trim())) {
+        return "Please enter a valid email address.";
+      }
+    }
+
+    return "";
   };
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (
+    event: FormEvent<HTMLFormElement>
+  ) => {
     event.preventDefault();
+
+    const validationError = validateForm();
+
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
 
     setSubmitting(true);
     setError("");
     setSuccess("");
 
     try {
-      const token = localStorage.getItem("access_token");
+      const isEditing = Boolean(editingStudent);
 
-      const response = await fetch(`${API_URL}/students`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          admission_number: form.admission_number,
-          first_name: form.first_name,
-          last_name: form.last_name,
-          date_of_birth: form.date_of_birth,
-          gender: form.gender,
-          email: form.email || null,
-          phone: form.phone || null,
-          address: form.address || null,
-          class_id: form.class_id
-            ? Number(form.class_id)
-            : null,
-        }),
-      });
+      const payload = isEditing
+        ? {
+            first_name: form.first_name.trim(),
+            last_name: form.last_name.trim(),
+            date_of_birth: form.date_of_birth || null,
+            gender: form.gender || null,
+            email: form.email.trim() || null,
+            phone: form.phone.trim() || null,
+            address: form.address.trim() || null,
+            class_id: form.class_id
+              ? Number(form.class_id)
+              : null,
+          }
+        : {
+            admission_number: form.admission_number.trim(),
+            first_name: form.first_name.trim(),
+            last_name: form.last_name.trim(),
+            date_of_birth: form.date_of_birth || null,
+            gender: form.gender || null,
+            email: form.email.trim() || null,
+            phone: form.phone.trim() || null,
+            address: form.address.trim() || null,
+            class_id: form.class_id
+              ? Number(form.class_id)
+              : null,
+          };
 
-      if (response.status === 401) {
-        localStorage.removeItem("access_token");
-        localStorage.removeItem("user_role");
-        router.push("/login");
-        return;
-      }
-
-      const result = await response.json();
+      const response = await apiRequest(
+        isEditing
+          ? `/students/${editingStudent!.id}`
+          : "/students/",
+        {
+          method: isEditing ? "PUT" : "POST",
+          body: JSON.stringify(payload),
+        }
+      );
 
       if (!response.ok) {
         throw new Error(
-          result?.detail || "Failed to create student"
+          await readError(
+            response,
+            isEditing
+              ? "Failed to update student."
+              : "Failed to create student."
+          )
         );
       }
 
-      setSuccess("Student added successfully.");
-      resetForm();
-      setShowForm(false);
+      setSuccess(
+        isEditing
+          ? "Student updated successfully."
+          : "Student added successfully."
+      );
 
+      closeForm();
       await fetchStudents();
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setError(err.message || "Failed to add student.");
+
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Something went wrong.");
+      }
     } finally {
       setSubmitting(false);
     }
   };
 
+  const handleDeactivate = async (student: Student) => {
+    const confirmed = window.confirm(
+      `Deactivate ${student.first_name} ${student.last_name}?`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeleting(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const response = await apiRequest(
+        `/students/${student.id}`,
+        {
+          method: "DELETE",
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          await readError(
+            response,
+            "Failed to deactivate student."
+          )
+        );
+      }
+
+      setSuccess(
+        `${student.first_name} ${student.last_name} has been deactivated.`
+      );
+
+      await fetchStudents();
+    } catch (err) {
+      console.error(err);
+
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Failed to deactivate student.");
+      }
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#f5f7fb] text-slate-900">
-      {/* HEADER */}
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <div className="flex min-h-[76px] items-center justify-between px-6 py-4 lg:px-8">
+        <div className="flex min-h-[76px] items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#315b9b]">
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#315b9b] sm:text-[11px]">
               EduOS · Academic Management
             </p>
 
-            <h1 className="mt-1 text-2xl font-bold tracking-tight text-[#102a56]">
+            <h1 className="mt-1 text-xl font-bold tracking-tight text-[#102a56] sm:text-2xl">
               Students
             </h1>
 
-            <p className="mt-0.5 text-xs text-slate-500">
+            <p className="mt-0.5 hidden text-xs text-slate-500 sm:block">
               Manage student records and enrollment
             </p>
           </div>
 
           <button
-            onClick={() => {
-              setError("");
-              setSuccess("");
-              setShowForm(true);
-            }}
-            className="flex items-center gap-2 rounded-xl bg-[#102a56] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#183d73]"
+            onClick={openAddForm}
+            className="flex shrink-0 items-center gap-2 rounded-xl bg-[#102a56] px-3 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#183d73] sm:px-4"
           >
             <span className="text-lg leading-none">+</span>
-            Add Student
+            <span className="hidden sm:inline">Add Student</span>
+            <span className="sm:hidden">Add</span>
           </button>
         </div>
       </header>
 
-      {/* PAGE CONTENT */}
-      <main className="px-6 py-7 lg:px-8">
+      <main className="px-4 py-6 sm:px-6 lg:px-8 lg:py-7">
         <div className="mx-auto max-w-[1500px]">
-          {/* BREADCRUMB */}
           <div className="mb-6 flex items-center gap-2 text-xs text-slate-400">
             <button
               onClick={() => router.push("/dashboard")}
@@ -315,49 +482,53 @@ export default function StudentsPage() {
             </span>
           </div>
 
-          {/* SUCCESS */}
           {success && (
-            <div className="mb-5 flex items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-medium text-emerald-700">
+            <div className="mb-5 flex items-start justify-between gap-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 sm:px-5">
               <span>{success}</span>
 
               <button
                 onClick={() => setSuccess("")}
-                className="text-emerald-500 hover:text-emerald-700"
+                className="text-lg leading-none text-emerald-500 hover:text-emerald-700"
               >
                 ×
               </button>
             </div>
           )}
 
-          {/* ERROR */}
           {error && (
-            <div className="mb-5 flex items-center justify-between rounded-2xl border border-red-200 bg-red-50 px-5 py-3 text-sm font-medium text-red-700">
+            <div className="mb-5 flex items-start justify-between gap-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 sm:px-5">
               <span>{error}</span>
 
               <button
                 onClick={() => setError("")}
-                className="text-red-500 hover:text-red-700"
+                className="text-lg leading-none text-red-500 hover:text-red-700"
               >
                 ×
               </button>
             </div>
           )}
 
-          {/* OVERVIEW CARDS */}
-          <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <OverviewCard
               title="Total Students"
               value={students.length}
-              description="All student records"
+              description="Visible student records"
               icon="👨‍🎓"
             />
 
             <OverviewCard
-              title="Active Students"
+              title="Active"
               value={activeStudents}
               description="Currently active"
               icon="✓"
               green
+            />
+
+            <OverviewCard
+              title="Inactive"
+              value={inactiveStudents}
+              description="Deactivated records"
+              icon="−"
             />
 
             <OverviewCard
@@ -369,9 +540,7 @@ export default function StudentsPage() {
             />
           </section>
 
-          {/* MAIN PANEL */}
           <section className="mt-7 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-            {/* PANEL HEADER */}
             <div className="border-b border-slate-200 p-5 lg:p-6">
               <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
                 <div>
@@ -384,12 +553,12 @@ export default function StudentsPage() {
                   </h2>
 
                   <p className="mt-1 text-sm text-slate-500">
-                    Search, filter and open student profiles.
+                    Search, filter, edit, deactivate and open
+                    student profiles.
                   </p>
                 </div>
 
                 <div className="flex flex-col gap-3 md:flex-row">
-                  {/* SEARCH */}
                   <div className="relative">
                     <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
                       ⌕
@@ -406,7 +575,6 @@ export default function StudentsPage() {
                     />
                   </div>
 
-                  {/* CLASS FILTER */}
                   <select
                     value={classFilter}
                     onChange={(event) =>
@@ -425,34 +593,20 @@ export default function StudentsPage() {
                       </option>
                     ))}
                   </select>
-
-                  {/* STATUS FILTER */}
-                  <select
-                    value={statusFilter}
-                    onChange={(event) =>
-                      setStatusFilter(event.target.value)
-                    }
-                    className="h-11 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-600 outline-none focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
-                  >
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                    <option value="all">All Status</option>
-                  </select>
                 </div>
               </div>
             </div>
 
-            {/* TABLE */}
             <div className="overflow-x-auto">
               {loading ? (
                 <LoadingTable />
               ) : filteredStudents.length === 0 ? (
                 <EmptyState
                   search={search}
-                  onAdd={() => setShowForm(true)}
+                  onAdd={openAddForm}
                 />
               ) : (
-                <table className="min-w-[900px] w-full">
+                <table className="min-w-[1050px] w-full">
                   <thead>
                     <tr className="border-b border-slate-100 bg-slate-50/80 text-left">
                       <th className="px-6 py-4 text-[11px] font-bold uppercase tracking-wider text-slate-400">
@@ -476,7 +630,7 @@ export default function StudentsPage() {
                       </th>
 
                       <th className="px-6 py-4 text-right text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                        Action
+                        Actions
                       </th>
                     </tr>
                   </thead>
@@ -491,7 +645,6 @@ export default function StudentsPage() {
                           key={student.id}
                           className="group border-b border-slate-100 transition hover:bg-blue-50/30"
                         >
-                          {/* STUDENT */}
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-3">
                               <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#102a56] text-sm font-bold text-white">
@@ -511,14 +664,12 @@ export default function StudentsPage() {
                             </div>
                           </td>
 
-                          {/* ADMISSION */}
                           <td className="px-6 py-4">
                             <span className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-600">
                               {student.admission_number}
                             </span>
                           </td>
 
-                          {/* CLASS */}
                           <td className="px-6 py-4">
                             {student.school_class?.name ? (
                               <span className="inline-flex rounded-full bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700">
@@ -531,7 +682,6 @@ export default function StudentsPage() {
                             )}
                           </td>
 
-                          {/* CONTACT */}
                           <td className="px-6 py-4">
                             <div>
                               <p className="max-w-[220px] truncate text-sm text-slate-600">
@@ -544,7 +694,6 @@ export default function StudentsPage() {
                             </div>
                           </td>
 
-                          {/* STATUS */}
                           <td className="px-6 py-4">
                             {student.is_active ? (
                               <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
@@ -559,18 +708,44 @@ export default function StudentsPage() {
                             )}
                           </td>
 
-                          {/* ACTION */}
-                          <td className="px-6 py-4 text-right">
-                            <button
-                              onClick={() =>
-                                router.push(
-                                  `/dashboard/students/${student.id}`
-                                )
-                              }
-                              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-[#102a56] shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
-                            >
-                              View Profile →
-                            </button>
+                          <td className="px-6 py-4">
+                            <div className="flex justify-end gap-2">
+                              <button
+                                onClick={() =>
+                                  router.push(
+                                    `/dashboard/students/${student.id}`
+                                  )
+                                }
+                                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-[#102a56] shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
+                              >
+                                View
+                              </button>
+
+                              {student.is_active && (
+                                <>
+                                  <button
+                                    onClick={() =>
+                                      openEditForm(student)
+                                    }
+                                    className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
+                                  >
+                                    Edit
+                                  </button>
+
+                                  <button
+                                    disabled={deleting}
+                                    onClick={() =>
+                                      void handleDeactivate(
+                                        student
+                                      )
+                                    }
+                                    className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    Deactivate
+                                  </button>
+                                </>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -580,7 +755,6 @@ export default function StudentsPage() {
               )}
             </div>
 
-            {/* FOOTER */}
             {!loading && filteredStudents.length > 0 && (
               <div className="flex flex-col gap-2 border-t border-slate-100 bg-slate-50/50 px-6 py-4 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
                 <span>
@@ -595,48 +769,47 @@ export default function StudentsPage() {
                   students
                 </span>
 
-                <span>
-                  EduOS Student Directory
-                </span>
+                <span>EduOS Student Directory</span>
               </div>
             )}
           </section>
         </div>
       </main>
 
-      {/* ADD STUDENT MODAL */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
           <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
-            {/* MODAL HEADER */}
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-5">
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-5 sm:px-6">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#315b9b]">
                   Student Management
                 </p>
 
                 <h2 className="mt-1 text-xl font-bold text-[#102a56]">
-                  Add New Student
+                  {editingStudent
+                    ? "Edit Student"
+                    : "Add New Student"}
                 </h2>
+
+                {editingStudent && (
+                  <p className="mt-1 text-xs text-slate-400">
+                    Admission number cannot be changed.
+                  </p>
+                )}
               </div>
 
               <button
-                onClick={() => {
-                  setShowForm(false);
-                  resetForm();
-                }}
+                onClick={closeForm}
                 className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition hover:bg-slate-200"
               >
                 ×
               </button>
             </div>
 
-            {/* FORM */}
             <form
               onSubmit={handleSubmit}
-              className="space-y-6 p-6"
+              className="space-y-6 p-5 sm:p-6"
             >
-              {/* BASIC INFORMATION */}
               <div>
                 <div className="mb-4">
                   <h3 className="font-bold text-[#102a56]">
@@ -644,17 +817,22 @@ export default function StudentsPage() {
                   </h3>
 
                   <p className="mt-1 text-xs text-slate-400">
-                    Enter the student's identity and admission details.
+                    Enter the student's identity and admission
+                    details.
                   </p>
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
                   <FormField
                     label="Admission Number"
-                    required
+                    required={!editingStudent}
+                    disabled={Boolean(editingStudent)}
                     value={form.admission_number}
                     onChange={(value) =>
-                      handleInput("admission_number", value)
+                      handleInput(
+                        "admission_number",
+                        value
+                      )
                     }
                     placeholder="e.g. ADM001"
                   />
@@ -681,11 +859,13 @@ export default function StudentsPage() {
 
                   <FormField
                     label="Date of Birth"
-                    required
                     type="date"
                     value={form.date_of_birth}
                     onChange={(value) =>
-                      handleInput("date_of_birth", value)
+                      handleInput(
+                        "date_of_birth",
+                        value
+                      )
                     }
                   />
 
@@ -697,13 +877,20 @@ export default function StudentsPage() {
                     <select
                       value={form.gender}
                       onChange={(event) =>
-                        handleInput("gender", event.target.value)
+                        handleInput(
+                          "gender",
+                          event.target.value
+                        )
                       }
                       className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
                     >
-                      <option value="">Select gender</option>
+                      <option value="">
+                        Select gender
+                      </option>
                       <option value="Male">Male</option>
-                      <option value="Female">Female</option>
+                      <option value="Female">
+                        Female
+                      </option>
                       <option value="Other">Other</option>
                     </select>
                   </div>
@@ -716,18 +903,25 @@ export default function StudentsPage() {
                     <select
                       value={form.class_id}
                       onChange={(event) =>
-                        handleInput("class_id", event.target.value)
+                        handleInput(
+                          "class_id",
+                          event.target.value
+                        )
                       }
-                      className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
+                      disabled={classesLoading}
+                      className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100 disabled:opacity-60"
                     >
                       <option value="">
                         {classesLoading
                           ? "Loading classes..."
-                          : "Select class"}
+                          : "No class assigned"}
                       </option>
 
                       {classes
-                        .filter((schoolClass) => schoolClass.is_active)
+                        .filter(
+                          (schoolClass) =>
+                            schoolClass.is_active
+                        )
                         .map((schoolClass) => (
                           <option
                             key={schoolClass.id}
@@ -741,7 +935,6 @@ export default function StudentsPage() {
                 </div>
               </div>
 
-              {/* CONTACT */}
               <div>
                 <div className="mb-4">
                   <h3 className="font-bold text-[#102a56]">
@@ -781,7 +974,10 @@ export default function StudentsPage() {
                     <textarea
                       value={form.address}
                       onChange={(event) =>
-                        handleInput("address", event.target.value)
+                        handleInput(
+                          "address",
+                          event.target.value
+                        )
                       }
                       rows={3}
                       placeholder="Student address"
@@ -791,14 +987,10 @@ export default function StudentsPage() {
                 </div>
               </div>
 
-              {/* ACTIONS */}
               <div className="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end">
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowForm(false);
-                    resetForm();
-                  }}
+                  onClick={closeForm}
                   className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
                 >
                   Cancel
@@ -809,7 +1001,13 @@ export default function StudentsPage() {
                   disabled={submitting}
                   className="rounded-xl bg-[#102a56] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#183d73] disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {submitting ? "Adding Student..." : "Add Student"}
+                  {submitting
+                    ? editingStudent
+                      ? "Saving..."
+                      : "Adding Student..."
+                    : editingStudent
+                      ? "Save Changes"
+                      : "Add Student"}
                 </button>
               </div>
             </form>
@@ -819,10 +1017,6 @@ export default function StudentsPage() {
     </div>
   );
 }
-
-/* =========================================================
-   OVERVIEW CARD
-========================================================= */
 
 function OverviewCard({
   title,
@@ -878,10 +1072,6 @@ function OverviewCard({
   );
 }
 
-/* =========================================================
-   FORM FIELD
-========================================================= */
-
 function FormField({
   label,
   value,
@@ -889,6 +1079,7 @@ function FormField({
   placeholder,
   type = "text",
   required = false,
+  disabled = false,
 }: {
   label: string;
   value: string;
@@ -896,6 +1087,7 @@ function FormField({
   placeholder?: string;
   type?: string;
   required?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <div>
@@ -910,18 +1102,15 @@ function FormField({
       <input
         type={type}
         required={required}
+        disabled={disabled}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
+        className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
       />
     </div>
   );
 }
-
-/* =========================================================
-   LOADING
-========================================================= */
 
 function LoadingTable() {
   return (
@@ -947,10 +1136,6 @@ function LoadingTable() {
   );
 }
 
-/* =========================================================
-   EMPTY STATE
-========================================================= */
-
 function EmptyState({
   search,
   onAdd,
@@ -970,7 +1155,7 @@ function EmptyState({
 
       <p className="mt-2 max-w-sm text-sm leading-6 text-slate-500">
         {search
-          ? "Try changing your search or filters to find the student you're looking for."
+          ? "Try changing your search or class filter."
           : "Start building your student directory by adding the first student."}
       </p>
 

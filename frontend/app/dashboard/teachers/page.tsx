@@ -27,6 +27,14 @@ type TeacherForm = {
   email: string;
 };
 
+type TeacherUpdateForm = {
+  employee_number: string;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  email: string;
+};
+
 export default function TeachersPage() {
   const router = useRouter();
 
@@ -36,14 +44,29 @@ export default function TeachersPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
 
-  const [showForm, setShowForm] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+
+  const [selectedTeacher, setSelectedTeacher] =
+    useState<Teacher | null>(null);
+
   const [submitting, setSubmitting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
   const [form, setForm] = useState<TeacherForm>({
     user_id: "",
+    employee_number: "",
+    first_name: "",
+    last_name: "",
+    phone: "",
+    email: "",
+  });
+
+  const [editForm, setEditForm] = useState<TeacherUpdateForm>({
     employee_number: "",
     first_name: "",
     last_name: "",
@@ -62,6 +85,12 @@ export default function TeachersPage() {
     fetchTeachers();
   }, [router]);
 
+  const logout = () => {
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("user_role");
+    router.push("/login");
+  };
+
   const fetchTeachers = async () => {
     try {
       setLoading(true);
@@ -69,28 +98,29 @@ export default function TeachersPage() {
 
       const token = localStorage.getItem("access_token");
 
-      const response = await fetch(`${API_URL}/teachers`, {
+      const response = await fetch(`${API_URL}/teachers/`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
 
       if (response.status === 401) {
-        localStorage.removeItem("access_token");
-        localStorage.removeItem("user_role");
-        router.push("/login");
+        logout();
         return;
       }
 
+      const result = await response.json();
+
       if (!response.ok) {
-        throw new Error("Failed to fetch teachers");
+        throw new Error(
+          result?.detail || "Failed to load teachers."
+        );
       }
 
-      const data = await response.json();
-      setTeachers(data);
-    } catch (err) {
+      setTeachers(Array.isArray(result) ? result : []);
+    } catch (err: any) {
       console.error(err);
-      setError("Failed to load teachers.");
+      setError(err.message || "Failed to load teachers.");
     } finally {
       setLoading(false);
     }
@@ -114,7 +144,11 @@ export default function TeachersPage() {
       const matchesSearch =
         !query ||
         fullName.includes(query) ||
-        teacher.employee_number.toLowerCase().includes(query) ||
+        teacher.employee_number
+          .toLowerCase()
+          .includes(query) ||
+        String(teacher.id).includes(query) ||
+        String(teacher.user_id).includes(query) ||
         (teacher.email ?? "").toLowerCase().includes(query) ||
         (teacher.phone ?? "").toLowerCase().includes(query);
 
@@ -137,7 +171,17 @@ export default function TeachersPage() {
     }));
   };
 
-  const resetForm = () => {
+  const handleEditInput = (
+    field: keyof TeacherUpdateForm,
+    value: string
+  ) => {
+    setEditForm((previous) => ({
+      ...previous,
+      [field]: value,
+    }));
+  };
+
+  const resetAddForm = () => {
     setForm({
       user_id: "",
       employee_number: "",
@@ -148,7 +192,59 @@ export default function TeachersPage() {
     });
   };
 
-  const handleSubmit = async (
+  const openAddModal = () => {
+    setError("");
+    setSuccess("");
+    resetAddForm();
+    setShowAddModal(true);
+  };
+
+  const closeAddModal = () => {
+    if (submitting) return;
+
+    setShowAddModal(false);
+    resetAddForm();
+  };
+
+  const openEditModal = (teacher: Teacher) => {
+    setError("");
+    setSuccess("");
+
+    setSelectedTeacher(teacher);
+
+    setEditForm({
+      employee_number: teacher.employee_number || "",
+      first_name: teacher.first_name || "",
+      last_name: teacher.last_name || "",
+      phone: teacher.phone || "",
+      email: teacher.email || "",
+    });
+
+    setShowEditModal(true);
+  };
+
+  const closeEditModal = () => {
+    if (submitting) return;
+
+    setShowEditModal(false);
+    setSelectedTeacher(null);
+  };
+
+  const openDeleteModal = (teacher: Teacher) => {
+    setError("");
+    setSuccess("");
+    setSelectedTeacher(teacher);
+    setShowDeleteModal(true);
+  };
+
+  const closeDeleteModal = () => {
+    if (deleting) return;
+
+    setShowDeleteModal(false);
+    setSelectedTeacher(null);
+  };
+
+  const handleCreateTeacher = async (
     event: FormEvent<HTMLFormElement>
   ) => {
     event.preventDefault();
@@ -160,7 +256,7 @@ export default function TeachersPage() {
     try {
       const token = localStorage.getItem("access_token");
 
-      const response = await fetch(`${API_URL}/teachers`, {
+      const response = await fetch(`${API_URL}/teachers/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -168,18 +264,16 @@ export default function TeachersPage() {
         },
         body: JSON.stringify({
           user_id: Number(form.user_id),
-          employee_number: form.employee_number,
-          first_name: form.first_name,
-          last_name: form.last_name,
-          phone: form.phone || null,
-          email: form.email || null,
+          employee_number: form.employee_number.trim(),
+          first_name: form.first_name.trim(),
+          last_name: form.last_name.trim(),
+          phone: form.phone.trim() || null,
+          email: form.email.trim() || null,
         }),
       });
 
       if (response.status === 401) {
-        localStorage.removeItem("access_token");
-        localStorage.removeItem("user_role");
-        router.push("/login");
+        logout();
         return;
       }
 
@@ -187,20 +281,131 @@ export default function TeachersPage() {
 
       if (!response.ok) {
         throw new Error(
-          result?.detail || "Failed to create teacher"
+          result?.detail || "Failed to create teacher."
         );
       }
 
-      setSuccess("Teacher added successfully.");
-      resetForm();
-      setShowForm(false);
+      setSuccess("Teacher created successfully.");
+      setShowAddModal(false);
+      resetAddForm();
 
       await fetchTeachers();
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Failed to add teacher.");
+      setError(
+        err.message || "Failed to create teacher."
+      );
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleUpdateTeacher = async (
+    event: FormEvent<HTMLFormElement>
+  ) => {
+    event.preventDefault();
+
+    if (!selectedTeacher) return;
+
+    setSubmitting(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const token = localStorage.getItem("access_token");
+
+      const response = await fetch(
+        `${API_URL}/teachers/${selectedTeacher.id}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            employee_number:
+              editForm.employee_number.trim(),
+            first_name: editForm.first_name.trim(),
+            last_name: editForm.last_name.trim(),
+            phone: editForm.phone.trim() || null,
+            email: editForm.email.trim() || null,
+          }),
+        }
+      );
+
+      if (response.status === 401) {
+        logout();
+        return;
+      }
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result?.detail || "Failed to update teacher."
+        );
+      }
+
+      setSuccess("Teacher updated successfully.");
+      setShowEditModal(false);
+      setSelectedTeacher(null);
+
+      await fetchTeachers();
+    } catch (err: any) {
+      console.error(err);
+      setError(
+        err.message || "Failed to update teacher."
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeleteTeacher = async () => {
+    if (!selectedTeacher) return;
+
+    setDeleting(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const token = localStorage.getItem("access_token");
+
+      const response = await fetch(
+        `${API_URL}/teachers/${selectedTeacher.id}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (response.status === 401) {
+        logout();
+        return;
+      }
+
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(
+          result?.detail || "Failed to delete teacher."
+        );
+      }
+
+      setSuccess("Teacher deleted successfully.");
+      setShowDeleteModal(false);
+      setSelectedTeacher(null);
+
+      await fetchTeachers();
+    } catch (err: any) {
+      console.error(err);
+      setError(
+        err.message || "Failed to delete teacher."
+      );
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -208,9 +413,9 @@ export default function TeachersPage() {
     <div className="min-h-screen bg-[#f5f7fb] text-slate-900">
       {/* HEADER */}
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <div className="flex min-h-[76px] items-center justify-between px-6 py-4 lg:px-8">
+        <div className="flex min-h-[76px] flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between lg:px-8">
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#315b9b]">
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#315b9b] sm:text-[11px]">
               EduOS · Academic Management
             </p>
 
@@ -224,12 +429,8 @@ export default function TeachersPage() {
           </div>
 
           <button
-            onClick={() => {
-              setError("");
-              setSuccess("");
-              setShowForm(true);
-            }}
-            className="flex items-center gap-2 rounded-xl bg-[#102a56] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#183d73]"
+            onClick={openAddModal}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#102a56] px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#183d73] sm:w-auto"
           >
             <span className="text-lg leading-none">+</span>
             Add Teacher
@@ -237,7 +438,7 @@ export default function TeachersPage() {
         </div>
       </header>
 
-      <main className="px-6 py-7 lg:px-8">
+      <main className="px-4 py-6 sm:px-6 lg:px-8 lg:py-7">
         <div className="mx-auto max-w-[1500px]">
           {/* BREADCRUMB */}
           <div className="mb-6 flex items-center gap-2 text-xs text-slate-400">
@@ -257,12 +458,12 @@ export default function TeachersPage() {
 
           {/* SUCCESS */}
           {success && (
-            <div className="mb-5 flex items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-medium text-emerald-700">
+            <div className="mb-5 flex items-center justify-between gap-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 sm:px-5">
               <span>{success}</span>
 
               <button
                 onClick={() => setSuccess("")}
-                className="text-emerald-500 hover:text-emerald-700"
+                className="shrink-0 text-lg text-emerald-500 hover:text-emerald-700"
               >
                 ×
               </button>
@@ -271,12 +472,12 @@ export default function TeachersPage() {
 
           {/* ERROR */}
           {error && (
-            <div className="mb-5 flex items-center justify-between rounded-2xl border border-red-200 bg-red-50 px-5 py-3 text-sm font-medium text-red-700">
+            <div className="mb-5 flex items-center justify-between gap-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 sm:px-5">
               <span>{error}</span>
 
               <button
                 onClick={() => setError("")}
-                className="text-red-500 hover:text-red-700"
+                className="shrink-0 text-lg text-red-500 hover:text-red-700"
               >
                 ×
               </button>
@@ -323,7 +524,7 @@ export default function TeachersPage() {
                   </h2>
 
                   <p className="mt-1 text-sm text-slate-500">
-                    Search and manage teacher records.
+                    Search, edit and manage teacher records.
                   </p>
                 </div>
 
@@ -353,9 +554,17 @@ export default function TeachersPage() {
                     }
                     className="h-11 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-600 outline-none focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
                   >
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                    <option value="all">All Status</option>
+                    <option value="active">
+                      Active
+                    </option>
+
+                    <option value="inactive">
+                      Inactive
+                    </option>
+
+                    <option value="all">
+                      All Status
+                    </option>
                   </select>
                 </div>
               </div>
@@ -368,10 +577,10 @@ export default function TeachersPage() {
               ) : filteredTeachers.length === 0 ? (
                 <EmptyState
                   search={search}
-                  onAdd={() => setShowForm(true)}
+                  onAdd={openAddModal}
                 />
               ) : (
-                <table className="min-w-[950px] w-full">
+                <table className="min-w-[1150px] w-full">
                   <thead>
                     <tr className="border-b border-slate-100 bg-slate-50/80 text-left">
                       <th className="px-6 py-4 text-[11px] font-bold uppercase tracking-wider text-slate-400">
@@ -395,7 +604,7 @@ export default function TeachersPage() {
                       </th>
 
                       <th className="px-6 py-4 text-right text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                        Record
+                        Actions
                       </th>
                     </tr>
                   </thead>
@@ -448,11 +657,13 @@ export default function TeachersPage() {
                           <td className="px-6 py-4">
                             <div>
                               <p className="max-w-[230px] truncate text-sm text-slate-600">
-                                {teacher.email || "No email"}
+                                {teacher.email ||
+                                  "No email"}
                               </p>
 
                               <p className="mt-1 text-xs text-slate-400">
-                                {teacher.phone || "No phone"}
+                                {teacher.phone ||
+                                  "No phone"}
                               </p>
                             </div>
                           </td>
@@ -472,11 +683,31 @@ export default function TeachersPage() {
                             )}
                           </td>
 
-                          {/* ID */}
-                          <td className="px-6 py-4 text-right">
-                            <span className="text-xs font-medium text-slate-400">
-                              #{teacher.id}
-                            </span>
+                          {/* ACTIONS */}
+                          <td className="px-6 py-4">
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() =>
+                                  openEditModal(
+                                    teacher
+                                  )
+                                }
+                                className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
+                              >
+                                ✎ Edit
+                              </button>
+
+                              <button
+                                onClick={() =>
+                                  openDeleteModal(
+                                    teacher
+                                  )
+                                }
+                                className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600 transition hover:border-red-300 hover:bg-red-100"
+                              >
+                                🗑 Delete
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -487,176 +718,436 @@ export default function TeachersPage() {
             </div>
 
             {/* FOOTER */}
-            {!loading && filteredTeachers.length > 0 && (
-              <div className="flex flex-col gap-2 border-t border-slate-100 bg-slate-50/50 px-6 py-4 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
-                <span>
-                  Showing{" "}
-                  <strong className="text-slate-600">
-                    {filteredTeachers.length}
-                  </strong>{" "}
-                  of{" "}
-                  <strong className="text-slate-600">
-                    {teachers.length}
-                  </strong>{" "}
-                  teachers
-                </span>
+            {!loading &&
+              filteredTeachers.length > 0 && (
+                <div className="flex flex-col gap-2 border-t border-slate-100 bg-slate-50/50 px-6 py-4 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
+                  <span>
+                    Showing{" "}
+                    <strong className="text-slate-600">
+                      {filteredTeachers.length}
+                    </strong>{" "}
+                    of{" "}
+                    <strong className="text-slate-600">
+                      {teachers.length}
+                    </strong>{" "}
+                    teachers
+                  </span>
 
-                <span>EduOS Faculty Directory</span>
-              </div>
-            )}
+                  <span>
+                    EduOS Faculty Directory
+                  </span>
+                </div>
+              )}
           </section>
         </div>
       </main>
 
       {/* ADD TEACHER MODAL */}
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
-          <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
-            {/* MODAL HEADER */}
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-5">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#315b9b]">
-                  Faculty Management
-                </p>
+      {showAddModal && (
+        <ModalShell onClose={closeAddModal}>
+          <div className="border-b border-slate-200 px-6 py-5">
+            <ModalHeader
+              eyebrow="Faculty Management"
+              title="Add New Teacher"
+              description="Create a teacher profile and link it to an existing user account."
+              onClose={closeAddModal}
+            />
+          </div>
 
-                <h2 className="mt-1 text-xl font-bold text-[#102a56]">
-                  Add New Teacher
-                </h2>
+          <form
+            onSubmit={handleCreateTeacher}
+            className="space-y-6 p-6"
+          >
+            <div>
+              <div className="mb-4">
+                <h3 className="font-bold text-[#102a56]">
+                  Account Mapping
+                </h3>
+
+                <p className="mt-1 text-xs leading-5 text-slate-400">
+                  Link this teacher profile to an existing teacher-role user account.
+                </p>
               </div>
 
-              <button
-                onClick={() => {
-                  setShowForm(false);
-                  resetForm();
-                }}
-                className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition hover:bg-slate-200"
-              >
-                ×
-              </button>
+              <FormField
+                label="User ID"
+                required
+                type="number"
+                value={form.user_id}
+                onChange={(value) =>
+                  handleInput("user_id", value)
+                }
+                placeholder="e.g. 5"
+              />
             </div>
 
-            <form
-              onSubmit={handleSubmit}
-              className="space-y-6 p-6"
-            >
-              {/* ACCOUNT */}
-              <div>
-                <div className="mb-4">
-                  <h3 className="font-bold text-[#102a56]">
-                    Account Mapping
-                  </h3>
+            <div>
+              <div className="mb-4">
+                <h3 className="font-bold text-[#102a56]">
+                  Teacher Information
+                </h3>
 
-                  <p className="mt-1 text-xs leading-5 text-slate-400">
-                    Link this teacher profile to an existing teacher-role
-                    user account.
-                  </p>
-                </div>
-
-                <FormField
-                  label="User ID"
-                  required
-                  type="number"
-                  value={form.user_id}
-                  onChange={(value) =>
-                    handleInput("user_id", value)
-                  }
-                  placeholder="e.g. 5"
-                />
+                <p className="mt-1 text-xs text-slate-400">
+                  Enter the faculty member&apos;s professional details.
+                </p>
               </div>
 
-              {/* BASIC */}
-              <div>
-                <div className="mb-4">
-                  <h3 className="font-bold text-[#102a56]">
-                    Teacher Information
-                  </h3>
+              <div className="grid gap-4 md:grid-cols-2">
+                <FormField
+                  label="Employee Number"
+                  required
+                  value={form.employee_number}
+                  onChange={(value) =>
+                    handleInput(
+                      "employee_number",
+                      value
+                    )
+                  }
+                  placeholder="e.g. EMP002"
+                />
 
-                  <p className="mt-1 text-xs text-slate-400">
-                    Enter the faculty member's professional details.
-                  </p>
+                <FormField
+                  label="First Name"
+                  required
+                  value={form.first_name}
+                  onChange={(value) =>
+                    handleInput("first_name", value)
+                  }
+                  placeholder="First name"
+                />
+
+                <FormField
+                  label="Last Name"
+                  required
+                  value={form.last_name}
+                  onChange={(value) =>
+                    handleInput("last_name", value)
+                  }
+                  placeholder="Last name"
+                />
+
+                <FormField
+                  label="Phone"
+                  value={form.phone}
+                  onChange={(value) =>
+                    handleInput("phone", value)
+                  }
+                  placeholder="Phone number"
+                />
+
+                <div className="md:col-span-2">
+                  <FormField
+                    label="Email"
+                    type="email"
+                    value={form.email}
+                    onChange={(value) =>
+                      handleInput("email", value)
+                    }
+                    placeholder="teacher@example.com"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <ModalActions
+              onCancel={closeAddModal}
+              loading={submitting}
+              submitText="Add Teacher"
+              loadingText="Adding Teacher..."
+            />
+          </form>
+        </ModalShell>
+      )}
+
+      {/* EDIT TEACHER MODAL */}
+      {showEditModal && selectedTeacher && (
+        <ModalShell onClose={closeEditModal}>
+          <div className="border-b border-slate-200 px-6 py-5">
+            <ModalHeader
+              eyebrow="Faculty Management"
+              title="Edit Teacher"
+              description={`Update ${selectedTeacher.first_name} ${selectedTeacher.last_name}'s faculty information.`}
+              onClose={closeEditModal}
+            />
+          </div>
+
+          <form
+            onSubmit={handleUpdateTeacher}
+            className="space-y-6 p-6"
+          >
+            <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#102a56] text-sm font-bold text-white">
+                  {`${selectedTeacher.first_name?.[0] ?? ""}${selectedTeacher.last_name?.[0] ?? ""}`.toUpperCase()}
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-2">
-                  <FormField
-                    label="Employee Number"
-                    required
-                    value={form.employee_number}
-                    onChange={(value) =>
-                      handleInput("employee_number", value)
-                    }
-                    placeholder="e.g. EMP002"
-                  />
+                <div>
+                  <p className="font-semibold text-[#102a56]">
+                    {selectedTeacher.first_name}{" "}
+                    {selectedTeacher.last_name}
+                  </p>
 
-                  <FormField
-                    label="First Name"
-                    required
-                    value={form.first_name}
-                    onChange={(value) =>
-                      handleInput("first_name", value)
-                    }
-                    placeholder="First name"
-                  />
+                  <p className="text-xs text-slate-500">
+                    Teacher #{selectedTeacher.id} · User #
+                    {selectedTeacher.user_id}
+                  </p>
+                </div>
+              </div>
+            </div>
 
-                  <FormField
-                    label="Last Name"
-                    required
-                    value={form.last_name}
-                    onChange={(value) =>
-                      handleInput("last_name", value)
-                    }
-                    placeholder="Last name"
-                  />
+            <div className="grid gap-4 md:grid-cols-2">
+              <FormField
+                label="Employee Number"
+                required
+                value={editForm.employee_number}
+                onChange={(value) =>
+                  handleEditInput(
+                    "employee_number",
+                    value
+                  )
+                }
+                placeholder="EMP001"
+              />
 
-                  <FormField
-                    label="Phone"
-                    value={form.phone}
-                    onChange={(value) =>
-                      handleInput("phone", value)
-                    }
-                    placeholder="Phone number"
-                  />
+              <FormField
+                label="First Name"
+                required
+                value={editForm.first_name}
+                onChange={(value) =>
+                  handleEditInput(
+                    "first_name",
+                    value
+                  )
+                }
+                placeholder="First name"
+              />
 
-                  <div className="md:col-span-2">
-                    <FormField
-                      label="Email"
-                      type="email"
-                      value={form.email}
-                      onChange={(value) =>
-                        handleInput("email", value)
-                      }
-                      placeholder="teacher@example.com"
-                    />
+              <FormField
+                label="Last Name"
+                required
+                value={editForm.last_name}
+                onChange={(value) =>
+                  handleEditInput(
+                    "last_name",
+                    value
+                  )
+                }
+                placeholder="Last name"
+              />
+
+              <FormField
+                label="Phone"
+                value={editForm.phone}
+                onChange={(value) =>
+                  handleEditInput("phone", value)
+                }
+                placeholder="Phone number"
+              />
+
+              <div className="md:col-span-2">
+                <FormField
+                  label="Email"
+                  type="email"
+                  value={editForm.email}
+                  onChange={(value) =>
+                    handleEditInput("email", value)
+                  }
+                  placeholder="teacher@example.com"
+                />
+              </div>
+            </div>
+
+            <ModalActions
+              onCancel={closeEditModal}
+              loading={submitting}
+              submitText="Save Changes"
+              loadingText="Saving Changes..."
+            />
+          </form>
+        </ModalShell>
+      )}
+
+      {/* DELETE CONFIRMATION */}
+      {showDeleteModal && selectedTeacher && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl bg-white shadow-2xl">
+            <div className="p-6">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 text-xl">
+                🗑
+              </div>
+
+              <h2 className="mt-5 text-xl font-bold text-[#102a56]">
+                Delete Teacher?
+              </h2>
+
+              <p className="mt-2 text-sm leading-6 text-slate-500">
+                Are you sure you want to delete{" "}
+                <strong className="text-slate-700">
+                  {selectedTeacher.first_name}{" "}
+                  {selectedTeacher.last_name}
+                </strong>
+                ? This action will call the teacher delete API.
+              </p>
+
+              <div className="mt-5 rounded-2xl border border-red-100 bg-red-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-red-500">
+                  Teacher Record
+                </p>
+
+                <div className="mt-2 grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <p className="text-xs text-red-400">
+                      Teacher ID
+                    </p>
+
+                    <p className="font-semibold text-red-700">
+                      #{selectedTeacher.id}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-red-400">
+                      Employee No.
+                    </p>
+
+                    <p className="font-semibold text-red-700">
+                      {selectedTeacher.employee_number}
+                    </p>
                   </div>
                 </div>
               </div>
+            </div>
 
-              {/* ACTIONS */}
-              <div className="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowForm(false);
-                    resetForm();
-                  }}
-                  className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
+            <div className="flex flex-col-reverse gap-3 border-t border-slate-100 p-5 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={closeDeleteModal}
+                disabled={deleting}
+                className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
 
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="rounded-xl bg-[#102a56] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#183d73] disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {submitting
-                    ? "Adding Teacher..."
-                    : "Add Teacher"}
-                </button>
-              </div>
-            </form>
+              <button
+                type="button"
+                onClick={handleDeleteTeacher}
+                disabled={deleting}
+                className="rounded-xl bg-red-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {deleting
+                  ? "Deleting..."
+                  : "Yes, Delete Teacher"}
+              </button>
+            </div>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* =========================================================
+   MODAL SHELL
+========================================================= */
+
+function ModalShell({
+  children,
+  onClose,
+}: {
+  children: React.ReactNode;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   MODAL HEADER
+========================================================= */
+
+function ModalHeader({
+  eyebrow,
+  title,
+  description,
+  onClose,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  onClose: () => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div>
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#315b9b]">
+          {eyebrow}
+        </p>
+
+        <h2 className="mt-1 text-xl font-bold text-[#102a56]">
+          {title}
+        </h2>
+
+        <p className="mt-1 max-w-xl text-xs leading-5 text-slate-400">
+          {description}
+        </p>
+      </div>
+
+      <button
+        type="button"
+        onClick={onClose}
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition hover:bg-slate-200"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+/* =========================================================
+   MODAL ACTIONS
+========================================================= */
+
+function ModalActions({
+  onCancel,
+  loading,
+  submitText,
+  loadingText,
+}: {
+  onCancel: () => void;
+  loading: boolean;
+  submitText: string;
+  loadingText: string;
+}) {
+  return (
+    <div className="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end">
+      <button
+        type="button"
+        onClick={onCancel}
+        disabled={loading}
+        className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+      >
+        Cancel
+      </button>
+
+      <button
+        type="submit"
+        disabled={loading}
+        className="rounded-xl bg-[#102a56] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#183d73] disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {loading ? loadingText : submitText}
+      </button>
     </div>
   );
 }
@@ -744,7 +1235,9 @@ function FormField({
         {label}
 
         {required && (
-          <span className="ml-1 text-red-500">*</span>
+          <span className="ml-1 text-red-500">
+            *
+          </span>
         )}
       </label>
 
@@ -753,7 +1246,9 @@ function FormField({
         required={required}
         min={type === "number" ? 1 : undefined}
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) =>
+          onChange(event.target.value)
+        }
         placeholder={placeholder}
         className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
       />
@@ -782,7 +1277,7 @@ function LoadingTable() {
 
           <div className="hidden h-8 w-24 rounded bg-slate-100 md:block" />
 
-          <div className="h-8 w-20 rounded bg-slate-100" />
+          <div className="h-8 w-28 rounded bg-slate-100" />
         </div>
       ))}
     </div>
@@ -807,13 +1302,13 @@ function EmptyState({
       </div>
 
       <h3 className="mt-5 text-lg font-bold text-[#102a56]">
-        {search ? "No teachers found" : "No teachers yet"}
+        No teachers found
       </h3>
 
-      <p className="mt-2 max-w-sm text-sm leading-6 text-slate-500">
+      <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
         {search
-          ? "Try changing your search or status filter."
-          : "Start building your faculty directory by adding the first teacher."}
+          ? "No teacher records match your current search."
+          : "There are no teacher records available in this view yet."}
       </p>
 
       {!search && (
