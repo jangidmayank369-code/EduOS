@@ -1,178 +1,362 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 const API_URL = "http://127.0.0.1:8000";
 
-type Student = {
-  id: number;
-  admission_number: string;
+type Parent = {
+  parent_id: number;
   first_name: string;
   last_name: string;
-  date_of_birth?: string | null;
-  gender?: string | null;
-  email?: string | null;
-  phone?: string | null;
-  address?: string | null;
-  class_id?: number | null;
-  school_class?: {
+  phone: string | null;
+  relation_type: string;
+  is_primary: boolean;
+  is_emergency_contact: boolean;
+  receives_notifications: boolean;
+};
+
+type Student360 = {
+  student: {
     id: number;
-    name: string;
-  } | null;
-  is_active: boolean;
-  created_at?: string;
-  updated_at?: string;
+    admission_number: string;
+    first_name: string;
+    last_name: string;
+    date_of_birth: string | null;
+    gender: string | null;
+    email: string | null;
+    phone: string | null;
+    address: string | null;
+    class_id: number | null;
+    school_class: {
+      id: number;
+      name: string;
+    } | null;
+    is_active: boolean;
+    status: string;
+    status_changed_at: string;
+    status_reason: string | null;
+    created_at: string;
+    updated_at: string;
+  };
+
+  parents: Parent[];
+
+  status_history: {
+    id: number;
+    old_status: string;
+    new_status: string;
+    reason: string | null;
+    changed_at: string;
+    changed_by_user_id: number | null;
+  }[];
+
+  attendance: {
+    id: number;
+    student_id: number;
+    date: string;
+    status: string;
+  }[];
+
+  marks: {
+    id: number;
+    student_id: number;
+    exam_id: number;
+    subject_id: number;
+    marks: number;
+  }[];
+
+  fees: {
+    id: number;
+    student_id: number;
+    amount_due: number;
+    amount_paid: number;
+  }[];
+
+  assignments: {
+    id: number;
+    class_id: number;
+    subject_id: number | null;
+    title: string;
+    description: string | null;
+    due_date: string | null;
+  }[];
+
+  documents: {
+    id?: number;
+    name?: string;
+    type?: string;
+    status?: string;
+  }[];
 };
 
-type Attendance = {
-  id: number;
-  student_id: number;
-  date: string;
-  status: string;
-  marked_by?: number;
-};
+function getToken() {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("access_token");
+}
 
-export default function StudentProfilePage() {
-  const router = useRouter();
+function formatDate(value: string | null | undefined) {
+  if (!value) return "—";
+
+  return new Date(value).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "—";
+
+  return new Date(value).toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatCurrency(value: number | null | undefined) {
+  return `₹${Number(value || 0).toLocaleString("en-IN")}`;
+}
+
+function initials(firstName: string, lastName: string) {
+  return `${firstName?.[0] || ""}${lastName?.[0] || ""}`.toUpperCase();
+}
+
+function statusClasses(status: string) {
+  switch (status) {
+    case "ACTIVE":
+      return "bg-emerald-50 text-emerald-700 border-emerald-200";
+    case "INACTIVE":
+      return "bg-slate-100 text-slate-700 border-slate-200";
+    case "WITHDRAWN":
+      return "bg-red-50 text-red-700 border-red-200";
+    case "TRANSFERRED":
+      return "bg-amber-50 text-amber-700 border-amber-200";
+    case "PASSED_OUT":
+      return "bg-blue-50 text-blue-700 border-blue-200";
+    case "ALUMNI":
+      return "bg-violet-50 text-violet-700 border-violet-200";
+    default:
+      return "bg-slate-100 text-slate-700 border-slate-200";
+  }
+}
+
+function Section({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-100 px-5 py-4">
+        <h2 className="text-base font-bold text-slate-900">{title}</h2>
+        {subtitle && (
+          <p className="mt-1 text-xs text-slate-500">{subtitle}</p>
+        )}
+      </div>
+
+      <div className="p-5">{children}</div>
+    </section>
+  );
+}
+
+function EmptyState({ text }: { text: string }) {
+  return (
+    <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-5 py-8 text-center text-sm text-slate-500">
+      {text}
+    </div>
+  );
+}
+
+export default function Student360Page() {
   const params = useParams();
+  const router = useRouter();
 
-  const studentId = params.id as string;
+  const studentId = params?.id;
 
-  const [student, setStudent] = useState<Student | null>(null);
-  const [attendance, setAttendance] = useState<Attendance[]>([]);
-
+  const [data, setData] = useState<Student360 | null>(null);
   const [loading, setLoading] = useState(true);
-  const [attendanceLoading, setAttendanceLoading] = useState(true);
-
   const [error, setError] = useState("");
 
+  const [activeSection, setActiveSection] = useState("overview");
+
   useEffect(() => {
-    const token = localStorage.getItem("access_token");
-
-    if (!token) {
-      router.push("/login");
-      return;
-    }
-
     if (!studentId) return;
 
-    fetchStudent();
-    fetchAttendance();
-  }, [studentId, router]);
-
-  const fetchStudent = async () => {
-    try {
+    const fetchStudent360 = async () => {
       setLoading(true);
       setError("");
 
-      const token = localStorage.getItem("access_token");
+      try {
+        const token = getToken();
 
-      const response = await fetch(
-        `${API_URL}/students/${studentId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+        if (!token) {
+          router.push("/login");
+          return;
         }
-      );
 
-      if (response.status === 401) {
-        localStorage.removeItem("access_token");
-        localStorage.removeItem("user_role");
-        router.push("/login");
-        return;
-      }
+        const response = await fetch(
+          `${API_URL}/students/${studentId}/360`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
 
-      if (response.status === 404) {
-        throw new Error("Student not found");
-      }
-
-      if (!response.ok) {
-        throw new Error("Failed to fetch student");
-      }
-
-      const data = await response.json();
-      setStudent(data);
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Failed to load student");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchAttendance = async () => {
-    try {
-      setAttendanceLoading(true);
-
-      const token = localStorage.getItem("access_token");
-
-      const response = await fetch(
-        `${API_URL}/attendance/student/${studentId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+        if (response.status === 401) {
+          localStorage.removeItem("access_token");
+          localStorage.removeItem("user_role");
+          router.push("/login");
+          return;
         }
-      );
 
-      if (response.status === 401) {
-        localStorage.removeItem("access_token");
-        localStorage.removeItem("user_role");
-        router.push("/login");
-        return;
+        if (!response.ok) {
+          const body = await response.json().catch(() => null);
+
+          throw new Error(
+            body?.detail || "Unable to load student information"
+          );
+        }
+
+        const result = await response.json();
+        setData(result);
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Unable to load student information"
+        );
+      } finally {
+        setLoading(false);
       }
+    };
 
-      if (!response.ok) {
-        // Attendance may not be available for every role.
-        setAttendance([]);
-        return;
-      }
+    fetchStudent360();
+  }, [studentId, router]);
 
-      const data = await response.json();
-      setAttendance(data);
-    } catch (err) {
-      console.error(err);
-      setAttendance([]);
-    } finally {
-      setAttendanceLoading(false);
+  const attendanceSummary = useMemo(() => {
+    if (!data?.attendance?.length) {
+      return {
+        total: 0,
+        present: 0,
+        absent: 0,
+        percentage: 0,
+      };
     }
-  };
 
-  const attendanceStats = getAttendanceStats(attendance);
+    const total = data.attendance.length;
+
+    const present = data.attendance.filter(
+      (item) => item.status?.toUpperCase() === "PRESENT"
+    ).length;
+
+    const absent = data.attendance.filter(
+      (item) => item.status?.toUpperCase() === "ABSENT"
+    ).length;
+
+    return {
+      total,
+      present,
+      absent,
+      percentage: Math.round((present / total) * 100),
+    };
+  }, [data]);
+
+  const feeSummary = useMemo(() => {
+    const due = data?.fees?.reduce(
+      (sum, item) => sum + Number(item.amount_due || 0),
+      0
+    ) || 0;
+
+    const paid = data?.fees?.reduce(
+      (sum, item) => sum + Number(item.amount_paid || 0),
+      0
+    ) || 0;
+
+    return {
+      due,
+      paid,
+      pending: Math.max(due - paid, 0),
+    };
+  }, [data]);
+
+  const navigation = [
+    { id: "overview", label: "Overview" },
+    { id: "parents", label: "Parents" },
+    { id: "attendance", label: "Attendance" },
+    { id: "marks", label: "Marks" },
+    { id: "fees", label: "Fees" },
+    { id: "assignments", label: "Assignments" },
+    { id: "documents", label: "Documents" },
+    { id: "timeline", label: "Timeline" },
+  ];
 
   if (loading) {
-    return <ProfileLoading />;
+    return (
+      <div className="min-h-screen bg-[#f5f7fb]">
+        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+          <div className="mb-5 h-5 w-32 animate-pulse rounded bg-slate-200" />
+
+          <div className="rounded-3xl bg-slate-900 p-7">
+            <div className="flex gap-5">
+              <div className="h-20 w-20 animate-pulse rounded-2xl bg-white/10" />
+
+              <div className="flex-1 space-y-3">
+                <div className="h-6 w-56 animate-pulse rounded bg-white/10" />
+                <div className="h-4 w-40 animate-pulse rounded bg-white/10" />
+                <div className="h-4 w-72 animate-pulse rounded bg-white/10" />
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-5 lg:grid-cols-3">
+            {[1, 2, 3].map((item) => (
+              <div
+                key={item}
+                className="h-40 animate-pulse rounded-2xl bg-white shadow-sm"
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
   }
 
-  if (error || !student) {
+  if (error || !data) {
     return (
-      <div className="min-h-screen bg-[#f5f7fb] px-6 py-8 lg:px-8">
-        <div className="mx-auto max-w-5xl">
-          <button
-            onClick={() => router.push("/dashboard/students")}
-            className="mb-6 text-sm font-semibold text-[#315b9b] hover:underline"
-          >
-            ← Back to Students
-          </button>
+      <div className="min-h-screen bg-[#f5f7fb] px-4 py-10">
+        <div className="mx-auto max-w-xl rounded-2xl border border-red-200 bg-white p-8 text-center shadow-sm">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-50 text-xl text-red-600">
+            !
+          </div>
 
-          <div className="rounded-3xl border border-red-200 bg-white p-10 text-center shadow-sm">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50 text-xl">
-              !
-            </div>
+          <h1 className="text-lg font-bold text-slate-900">
+            Unable to load student
+          </h1>
 
-            <h2 className="mt-5 text-xl font-bold text-[#102a56]">
-              Unable to load student
-            </h2>
+          <p className="mt-2 text-sm text-slate-500">
+            {error || "Student information is unavailable."}
+          </p>
 
-            <p className="mt-2 text-sm text-slate-500">
-              {error || "Student record could not be found."}
-            </p>
+          <div className="mt-6 flex justify-center gap-3">
+            <button
+              onClick={() => window.location.reload()}
+              className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
+            >
+              Retry
+            </button>
 
             <button
               onClick={() => router.push("/dashboard/students")}
-              className="mt-6 rounded-xl bg-[#102a56] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#183d73]"
+              className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
               Back to Students
             </button>
@@ -182,324 +366,434 @@ export default function StudentProfilePage() {
     );
   }
 
-  const initials =
-    `${student.first_name?.[0] ?? ""}${student.last_name?.[0] ?? ""}`.toUpperCase();
+  const student = data.student;
 
   return (
-    <div className="min-h-screen bg-[#f5f7fb] text-slate-900">
-      {/* HEADER */}
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <div className="flex min-h-[76px] items-center justify-between px-6 py-4 lg:px-8">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#315b9b]">
-              EduOS · Student Management
-            </p>
-
-            <h1 className="mt-1 text-2xl font-bold tracking-tight text-[#102a56]">
-              Student Profile
-            </h1>
-          </div>
-
+    <div className="min-h-screen bg-[#f5f7fb]">
+      <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
+        {/* Top navigation */}
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <button
             onClick={() => router.push("/dashboard/students")}
-            className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-[#102a56] shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
           >
-            ← Back to Students
+            <span>←</span>
+            Students
           </button>
-        </div>
-      </header>
 
-      <main className="px-6 py-7 lg:px-8">
-        <div className="mx-auto max-w-[1450px]">
-          {/* BREADCRUMB */}
-          <div className="mb-6 flex items-center gap-2 text-xs text-slate-400">
-            <button
-              onClick={() => router.push("/dashboard")}
-              className="hover:text-[#315b9b]"
-            >
-              Dashboard
-            </button>
-
-            <span>›</span>
-
-            <button
-              onClick={() => router.push("/dashboard/students")}
-              className="hover:text-[#315b9b]"
-            >
-              Students
-            </button>
-
-            <span>›</span>
-
-            <span className="font-medium text-slate-600">
-              {student.first_name} {student.last_name}
-            </span>
+          <div className="text-xs font-medium text-slate-400">
+            Student 360 · ID #{student.id}
           </div>
+        </div>
 
-          {/* PROFILE HERO */}
-          <section className="relative overflow-hidden rounded-3xl bg-[#102a56] p-6 text-white shadow-lg lg:p-8">
-            <div className="absolute -right-16 -top-20 h-64 w-64 rounded-full bg-white/5" />
-            <div className="absolute -bottom-28 right-40 h-72 w-72 rounded-full bg-blue-400/5" />
+        {/* Hero */}
+        <div className="overflow-hidden rounded-3xl bg-slate-900 text-white shadow-xl">
+          <div className="relative p-6 sm:p-8">
+            <div className="absolute right-0 top-0 h-48 w-48 rounded-full bg-blue-500/10 blur-3xl" />
 
             <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex items-center gap-5">
-                <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-3xl bg-white text-xl font-bold text-[#102a56] shadow-lg">
-                  {initials || "ST"}
+              <div className="flex min-w-0 items-center gap-4 sm:gap-5">
+                <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-2xl font-bold ring-1 ring-white/10">
+                  {initials(student.first_name, student.last_name)}
                 </div>
 
-                <div>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <h2 className="text-2xl font-bold lg:text-3xl">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h1 className="truncate text-2xl font-bold sm:text-3xl">
                       {student.first_name} {student.last_name}
-                    </h2>
+                    </h1>
 
-                    {student.is_active ? (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-400/15 px-3 py-1.5 text-xs font-semibold text-emerald-200">
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
-                        Active
-                      </span>
-                    ) : (
-                      <span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-slate-300">
-                        Inactive
-                      </span>
-                    )}
+                    <span
+                      className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${statusClasses(
+                        student.status
+                      )}`}
+                    >
+                      {student.status.replaceAll("_", " ")}
+                    </span>
                   </div>
 
-                  <p className="mt-2 text-sm text-blue-100">
-                    Admission No.{" "}
-                    <span className="font-semibold text-white">
-                      {student.admission_number}
+                  <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-slate-300">
+                    <span>
+                      Admission:{" "}
+                      <strong className="text-white">
+                        {student.admission_number}
+                      </strong>
                     </span>
-                  </p>
 
-                  <p className="mt-1 text-xs text-blue-200">
+                    <span>
+                      Class:{" "}
+                      <strong className="text-white">
+                        {student.school_class?.name || "Not assigned"}
+                      </strong>
+                    </span>
+                  </div>
+
+                  <p className="mt-2 text-xs text-slate-400">
                     Student ID #{student.id}
                   </p>
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-white/10 bg-white/5 px-5 py-4 lg:min-w-[220px]">
-                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-blue-200">
-                  Current Class
-                </p>
-
-                <p className="mt-2 text-lg font-bold">
-                  {student.school_class?.name || "Not assigned"}
-                </p>
-
-                <p className="mt-1 text-xs text-blue-200">
-                  {student.class_id
-                    ? `Class ID #${student.class_id}`
-                    : "No class assigned"}
-                </p>
-              </div>
-            </div>
-          </section>
-
-          {/* SUMMARY CARDS */}
-          <section className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <SummaryCard
-              title="Attendance"
-              value={
-                attendance.length > 0
-                  ? `${attendanceStats.percentage}%`
-                  : "0%"
-              }
-              description={`${attendanceStats.present} present days`}
-              icon="✓"
-              green
-            />
-
-            <SummaryCard
-              title="Present"
-              value={attendanceStats.present}
-              description="Attendance records"
-              icon="P"
-            />
-
-            <SummaryCard
-              title="Absent"
-              value={attendanceStats.absent}
-              description="Attendance records"
-              icon="A"
-              red
-            />
-
-            <SummaryCard
-              title="Total Records"
-              value={attendanceStats.total}
-              description="Attendance history"
-              icon="▤"
-              blue
-            />
-          </section>
-
-          {/* PERSONAL + CONTACT */}
-          <section className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
-            <InfoCard
-              title="Personal Information"
-              subtitle="Basic student details"
-            >
-              <InfoRow
-                label="Full Name"
-                value={`${student.first_name} ${student.last_name}`}
-              />
-
-              <InfoRow
-                label="Date of Birth"
-                value={
-                  student.date_of_birth
-                    ? formatDate(student.date_of_birth)
-                    : "Not provided"
-                }
-              />
-
-              <InfoRow
-                label="Gender"
-                value={student.gender || "Not provided"}
-              />
-
-              <InfoRow
-                label="Admission Number"
-                value={student.admission_number}
-              />
-            </InfoCard>
-
-            <InfoCard
-              title="Contact Information"
-              subtitle="Communication details"
-            >
-              <InfoRow
-                label="Email"
-                value={student.email || "Not provided"}
-              />
-
-              <InfoRow
-                label="Phone"
-                value={student.phone || "Not provided"}
-              />
-
-              <InfoRow
-                label="Address"
-                value={student.address || "Not provided"}
-              />
-
-              <InfoRow
-                label="Account Status"
-                value={student.is_active ? "Active" : "Inactive"}
-                valueClass={
-                  student.is_active
-                    ? "text-emerald-600"
-                    : "text-slate-500"
-                }
-              />
-            </InfoCard>
-          </section>
-
-          {/* ATTENDANCE */}
-          <section className="mt-6 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex flex-col gap-4 border-b border-slate-200 p-6 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#315b9b]">
-                  Attendance
-                </p>
-
-                <h2 className="mt-1 text-xl font-bold text-[#102a56]">
-                  Attendance History
-                </h2>
-
-                <p className="mt-1 text-sm text-slate-500">
-                  Daily attendance records for this student.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-4 py-2.5">
-                <span className="h-2 w-2 rounded-full bg-emerald-500" />
-
-                <span className="text-sm font-semibold text-slate-600">
-                  {attendanceStats.percentage}% attendance
-                </span>
-              </div>
-            </div>
-
-            {attendanceLoading ? (
-              <AttendanceLoading />
-            ) : attendance.length === 0 ? (
-              <div className="px-6 py-14 text-center">
-                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-xl text-slate-500">
-                  ✓
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:min-w-[440px]">
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                  <p className="text-[11px] text-slate-400">Attendance</p>
+                  <p className="mt-1 text-xl font-bold">
+                    {attendanceSummary.percentage}%
+                  </p>
                 </div>
 
-                <h3 className="mt-4 font-bold text-[#102a56]">
-                  No attendance records
-                </h3>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                  <p className="text-[11px] text-slate-400">Marks Entries</p>
+                  <p className="mt-1 text-xl font-bold">
+                    {data.marks.length}
+                  </p>
+                </div>
 
-                <p className="mt-1 text-sm text-slate-500">
-                  Attendance has not been recorded for this student yet.
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                  <p className="text-[11px] text-slate-400">Fee Pending</p>
+                  <p className="mt-1 text-xl font-bold">
+                    {formatCurrency(feeSummary.pending)}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                  <p className="text-[11px] text-slate-400">Parents</p>
+                  <p className="mt-1 text-xl font-bold">
+                    {data.parents.length}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Section navigation */}
+        <div className="sticky top-0 z-20 mt-5 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex min-w-max gap-1 p-1.5">
+            {navigation.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => {
+                  setActiveSection(item.id);
+
+                  document
+                    .getElementById(`student-section-${item.id}`)
+                    ?.scrollIntoView({
+                      behavior: "smooth",
+                      block: "start",
+                    });
+                }}
+                className={`rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+                  activeSection === item.id
+                    ? "bg-slate-900 text-white"
+                    : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-5 space-y-5">
+          {/* Overview */}
+          <div id="student-section-overview">
+            <Section
+              title="Student Profile"
+              subtitle="Complete basic information currently available in EduOS"
+            >
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <InfoItem label="First Name" value={student.first_name} />
+                <InfoItem label="Last Name" value={student.last_name} />
+                <InfoItem
+                  label="Date of Birth"
+                  value={formatDate(student.date_of_birth)}
+                />
+                <InfoItem label="Gender" value={student.gender || "—"} />
+
+                <InfoItem label="Email" value={student.email || "—"} />
+                <InfoItem label="Phone" value={student.phone || "—"} />
+
+                <InfoItem
+                  label="Class"
+                  value={student.school_class?.name || "Not assigned"}
+                />
+
+                <InfoItem
+                  label="Status Changed"
+                  value={formatDateTime(student.status_changed_at)}
+                />
+              </div>
+
+              <div className="mt-4 rounded-xl bg-slate-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  Address
+                </p>
+
+                <p className="mt-1 text-sm text-slate-700">
+                  {student.address || "No address recorded"}
                 </p>
               </div>
-            ) : (
-              <>
-                <div className="overflow-x-auto">
-                  <table className="min-w-[650px] w-full">
-                    <thead>
-                      <tr className="border-b border-slate-100 bg-slate-50/80 text-left">
-                        <th className="px-6 py-4 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                          Date
-                        </th>
 
-                        <th className="px-6 py-4 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                          Day
-                        </th>
+              {student.status_reason && (
+                <div className="mt-4 rounded-xl border border-amber-100 bg-amber-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-600">
+                    Current Status Reason
+                  </p>
 
-                        <th className="px-6 py-4 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                          Status
-                        </th>
+                  <p className="mt-1 text-sm text-amber-800">
+                    {student.status_reason}
+                  </p>
+                </div>
+              )}
+            </Section>
+          </div>
 
-                        <th className="px-6 py-4 text-right text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                          Record ID
-                        </th>
+          {/* Parents */}
+          <div id="student-section-parents">
+            <Section
+              title="Parents & Guardians"
+              subtitle="People linked to this student and their communication responsibilities"
+            >
+              {data.parents.length === 0 ? (
+                <EmptyState text="No parent or guardian is linked to this student yet." />
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2">
+                  {data.parents.map((parent) => (
+                    <div
+                      key={`${parent.parent_id}-${parent.relation_type}`}
+                      className="rounded-2xl border border-slate-200 p-5"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <h3 className="font-bold text-slate-900">
+                            {parent.first_name} {parent.last_name}
+                          </h3>
+
+                          <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                            {parent.relation_type}
+                          </p>
+                        </div>
+
+                        {parent.is_primary && (
+                          <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-blue-700">
+                            Primary
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-2 gap-3">
+                        <InfoItem
+                          label="Phone"
+                          value={parent.phone || "—"}
+                        />
+
+                        <InfoItem
+                          label="Emergency"
+                          value={
+                            parent.is_emergency_contact
+                              ? "Yes"
+                              : "No"
+                          }
+                        />
+
+                        <InfoItem
+                          label="Notifications"
+                          value={
+                            parent.receives_notifications
+                              ? "Enabled"
+                              : "Disabled"
+                          }
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Section>
+          </div>
+
+          {/* Attendance */}
+          <div id="student-section-attendance">
+            <Section
+              title="Attendance"
+              subtitle="Attendance records available for this student"
+            >
+              <div className="grid gap-4 sm:grid-cols-3">
+                <MetricCard
+                  label="Total Records"
+                  value={attendanceSummary.total}
+                />
+
+                <MetricCard
+                  label="Present"
+                  value={attendanceSummary.present}
+                />
+
+                <MetricCard
+                  label="Absent"
+                  value={attendanceSummary.absent}
+                />
+              </div>
+
+              {data.attendance.length === 0 ? (
+                <div className="mt-5">
+                  <EmptyState text="No attendance records available." />
+                </div>
+              ) : (
+                <div className="mt-5 overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full min-w-[560px] text-left text-sm">
+                    <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400">
+                      <tr>
+                        <th className="px-4 py-3">Date</th>
+                        <th className="px-4 py-3">Status</th>
+                        <th className="px-4 py-3">Record ID</th>
                       </tr>
                     </thead>
 
-                    <tbody>
-                      {attendance.map((record) => {
-                        const isPresent =
-                          record.status.toLowerCase() === "present";
+                    <tbody className="divide-y divide-slate-100">
+                      {data.attendance.map((item) => (
+                        <tr key={item.id}>
+                          <td className="px-4 py-3 font-medium text-slate-700">
+                            {formatDate(item.date)}
+                          </td>
+
+                          <td className="px-4 py-3">
+                            <span
+                              className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+                                item.status?.toUpperCase() === "PRESENT"
+                                  ? "bg-emerald-50 text-emerald-700"
+                                  : "bg-red-50 text-red-700"
+                              }`}
+                            >
+                              {item.status}
+                            </span>
+                          </td>
+
+                          <td className="px-4 py-3 text-slate-400">
+                            #{item.id}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Section>
+          </div>
+
+          {/* Marks */}
+          <div id="student-section-marks">
+            <Section
+              title="Exams & Marks"
+              subtitle="Marks entries currently available for this student"
+            >
+              {data.marks.length === 0 ? (
+                <EmptyState text="No marks have been recorded yet." />
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full min-w-[620px] text-left text-sm">
+                    <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400">
+                      <tr>
+                        <th className="px-4 py-3">Exam</th>
+                        <th className="px-4 py-3">Subject</th>
+                        <th className="px-4 py-3">Marks</th>
+                        <th className="px-4 py-3">Record ID</th>
+                      </tr>
+                    </thead>
+
+                    <tbody className="divide-y divide-slate-100">
+                      {data.marks.map((item) => (
+                        <tr key={item.id}>
+                          <td className="px-4 py-3 font-medium text-slate-700">
+                            Exam #{item.exam_id}
+                          </td>
+
+                          <td className="px-4 py-3 text-slate-600">
+                            Subject #{item.subject_id}
+                          </td>
+
+                          <td className="px-4 py-3">
+                            <span className="font-bold text-slate-900">
+                              {item.marks}
+                            </span>
+                          </td>
+
+                          <td className="px-4 py-3 text-slate-400">
+                            #{item.id}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Section>
+          </div>
+
+          {/* Fees */}
+          <div id="student-section-fees">
+            <Section
+              title="Fees & Payments"
+              subtitle="Fee records currently available for this student"
+            >
+              <div className="grid gap-4 sm:grid-cols-3">
+                <MetricCard
+                  label="Total Due"
+                  value={formatCurrency(feeSummary.due)}
+                />
+
+                <MetricCard
+                  label="Total Paid"
+                  value={formatCurrency(feeSummary.paid)}
+                />
+
+                <MetricCard
+                  label="Pending"
+                  value={formatCurrency(feeSummary.pending)}
+                />
+              </div>
+
+              {data.fees.length === 0 ? (
+                <div className="mt-5">
+                  <EmptyState text="No fee records available." />
+                </div>
+              ) : (
+                <div className="mt-5 overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full min-w-[620px] text-left text-sm">
+                    <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400">
+                      <tr>
+                        <th className="px-4 py-3">Fee ID</th>
+                        <th className="px-4 py-3">Amount Due</th>
+                        <th className="px-4 py-3">Paid</th>
+                        <th className="px-4 py-3">Pending</th>
+                      </tr>
+                    </thead>
+
+                    <tbody className="divide-y divide-slate-100">
+                      {data.fees.map((item) => {
+                        const pending = Math.max(
+                          Number(item.amount_due || 0) -
+                            Number(item.amount_paid || 0),
+                          0
+                        );
 
                         return (
-                          <tr
-                            key={record.id}
-                            className="border-b border-slate-100 transition hover:bg-blue-50/30"
-                          >
-                            <td className="px-6 py-4">
-                              <span className="text-sm font-semibold text-slate-700">
-                                {formatDate(record.date)}
-                              </span>
+                          <tr key={item.id}>
+                            <td className="px-4 py-3 font-medium text-slate-700">
+                              #{item.id}
                             </td>
 
-                            <td className="px-6 py-4 text-sm text-slate-500">
-                              {getDayName(record.date)}
+                            <td className="px-4 py-3">
+                              {formatCurrency(item.amount_due)}
                             </td>
 
-                            <td className="px-6 py-4">
-                              {isPresent ? (
-                                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
-                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                                  Present
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700">
-                                  <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-                                  {capitalize(record.status)}
-                                </span>
-                              )}
+                            <td className="px-4 py-3 text-emerald-700">
+                              {formatCurrency(item.amount_paid)}
                             </td>
 
-                            <td className="px-6 py-4 text-right">
-                              <span className="text-xs font-medium text-slate-400">
-                                #{record.id}
-                              </span>
+                            <td className="px-4 py-3 font-semibold text-red-600">
+                              {formatCurrency(pending)}
                             </td>
                           </tr>
                         );
@@ -507,418 +801,188 @@ export default function StudentProfilePage() {
                     </tbody>
                   </table>
                 </div>
+              )}
+            </Section>
+          </div>
 
-                <div className="border-t border-slate-100 bg-slate-50/50 px-6 py-4">
-                  <div className="flex flex-wrap gap-5 text-xs">
-                    <span className="text-slate-500">
-                      Total:{" "}
-                      <strong className="text-slate-700">
-                        {attendanceStats.total}
-                      </strong>
-                    </span>
-
-                    <span className="text-emerald-600">
-                      Present:{" "}
-                      <strong>
-                        {attendanceStats.present}
-                      </strong>
-                    </span>
-
-                    <span className="text-red-600">
-                      Absent:{" "}
-                      <strong>
-                        {attendanceStats.absent}
-                      </strong>
-                    </span>
-                  </div>
-                </div>
-              </>
-            )}
-          </section>
-
-          {/* MARKS & RESULTS */}
-          <section className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <FeatureCard
-              icon="▣"
-              title="Marks & Results"
-              description="View examination marks, subject-wise performance and published results for this student."
-              action="Coming with Exams"
-            />
-
-            <FeatureCard
-              icon="□"
+          {/* Assignments */}
+          <div id="student-section-assignments">
+            <Section
               title="Assignments"
-              description="View assigned work, submission status, deadlines and academic activity."
-              action="Coming with Assignments"
-            />
-          </section>
+              subtitle="Assignments associated with the student's current class"
+            >
+              {data.assignments.length === 0 ? (
+                <EmptyState text="No assignments available for the current class." />
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2">
+                  {data.assignments.map((assignment) => (
+                    <div
+                      key={assignment.id}
+                      className="rounded-2xl border border-slate-200 p-5"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <h3 className="font-bold text-slate-900">
+                          {assignment.title}
+                        </h3>
 
-          {/* ACCOUNT METADATA */}
-          <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="mb-5">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#315b9b]">
-                Record Information
+                        <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">
+                          #{assignment.id}
+                        </span>
+                      </div>
+
+                      <p className="mt-2 text-sm text-slate-500">
+                        {assignment.description ||
+                          "No description provided."}
+                      </p>
+
+                      <div className="mt-4 flex flex-wrap gap-3 text-xs text-slate-500">
+                        <span>
+                          Subject: #{assignment.subject_id ?? "—"}
+                        </span>
+
+                        <span>
+                          Due: {formatDate(assignment.due_date)}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Section>
+          </div>
+
+          {/* Documents */}
+          <div id="student-section-documents">
+            <Section
+              title="Documents"
+              subtitle="Student documents will appear here once the document module is connected"
+            >
+              <EmptyState text="No document records are currently available." />
+            </Section>
+          </div>
+
+          {/* Timeline */}
+          <div id="student-section-timeline">
+            <Section
+              title="Student Timeline"
+              subtitle="Lifecycle/status history of this student"
+            >
+              {data.status_history.length === 0 ? (
+                <EmptyState text="No status history available yet." />
+              ) : (
+                <div className="relative ml-2 border-l border-slate-200 pl-6">
+                  {data.status_history.map((item) => (
+                    <div
+                      key={item.id}
+                      className="relative mb-6 last:mb-0"
+                    >
+                      <div className="absolute -left-[31px] top-1 h-3 w-3 rounded-full border-2 border-white bg-slate-900 shadow-sm" />
+
+                      <div className="rounded-2xl border border-slate-200 p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${statusClasses(
+                                item.new_status
+                              )}`}
+                            >
+                              {item.new_status.replaceAll("_", " ")}
+                            </span>
+
+                            <span className="text-xs text-slate-400">
+                              from{" "}
+                              {item.old_status.replaceAll("_", " ")}
+                            </span>
+                          </div>
+
+                          <span className="text-xs text-slate-400">
+                            {formatDateTime(item.changed_at)}
+                          </span>
+                        </div>
+
+                        {item.reason && (
+                          <p className="mt-3 text-sm text-slate-600">
+                            {item.reason}
+                          </p>
+                        )}
+
+                        {item.changed_by_user_id && (
+                          <p className="mt-2 text-xs text-slate-400">
+                            Changed by user #{item.changed_by_user_id}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Section>
+          </div>
+
+          {/* System metadata */}
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Record Created
               </p>
 
-              <h2 className="mt-1 text-xl font-bold text-[#102a56]">
-                System Details
-              </h2>
+              <p className="mt-2 text-sm font-semibold text-slate-800">
+                {formatDateTime(student.created_at)}
+              </p>
             </div>
 
-            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-              <Metadata
-                label="Student ID"
-                value={`#${student.id}`}
-              />
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Last Updated
+              </p>
 
-              <Metadata
-                label="Class ID"
-                value={
-                  student.class_id
-                    ? `#${student.class_id}`
-                    : "Not assigned"
-                }
-              />
-
-              <Metadata
-                label="Created"
-                value={
-                  student.created_at
-                    ? formatDateTime(student.created_at)
-                    : "Not available"
-                }
-              />
-
-              <Metadata
-                label="Last Updated"
-                value={
-                  student.updated_at
-                    ? formatDateTime(student.updated_at)
-                    : "Not available"
-                }
-              />
+              <p className="mt-2 text-sm font-semibold text-slate-800">
+                {formatDateTime(student.updated_at)}
+              </p>
             </div>
-          </section>
+          </div>
         </div>
-      </main>
+      </div>
     </div>
   );
 }
 
-/* =========================================================
-   SUMMARY CARD
-========================================================= */
-
-function SummaryCard({
-  title,
+function InfoItem({
+  label,
   value,
-  description,
-  icon,
-  green = false,
-  red = false,
-  blue = false,
 }: {
-  title: string;
+  label: string;
   value: string | number;
-  description: string;
-  icon: string;
-  green?: boolean;
-  red?: boolean;
-  blue?: boolean;
-}) {
-  let iconClass = "bg-slate-100 text-slate-700";
-
-  if (green) {
-    iconClass = "bg-emerald-50 text-emerald-700";
-  }
-
-  if (red) {
-    iconClass = "bg-red-50 text-red-700";
-  }
-
-  if (blue) {
-    iconClass = "bg-blue-50 text-blue-700";
-  }
-
-  return (
-    <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-slate-50" />
-
-      <div className="relative flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-slate-500">
-            {title}
-          </p>
-
-          <p className="mt-2 text-3xl font-bold text-[#102a56]">
-            {value}
-          </p>
-
-          <p className="mt-1 text-xs text-slate-400">
-            {description}
-          </p>
-        </div>
-
-        <div
-          className={`flex h-11 w-11 items-center justify-center rounded-xl text-sm font-bold ${iconClass}`}
-        >
-          {icon}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* =========================================================
-   INFO CARD
-========================================================= */
-
-function InfoCard({
-  title,
-  subtitle,
-  children,
-}: {
-  title: string;
-  subtitle: string;
-  children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-      <div className="mb-5">
-        <h2 className="text-lg font-bold text-[#102a56]">
-          {title}
-        </h2>
-
-        <p className="mt-1 text-xs text-slate-400">
-          {subtitle}
-        </p>
-      </div>
-
-      <div className="divide-y divide-slate-100">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-/* =========================================================
-   INFO ROW
-========================================================= */
-
-function InfoRow({
-  label,
-  value,
-  valueClass = "text-slate-700",
-}: {
-  label: string;
-  value: string;
-  valueClass?: string;
-}) {
-  return (
-    <div className="flex flex-col gap-1 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
-      <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
-        {label}
-      </span>
-
-      <span
-        className={`text-sm font-semibold sm:max-w-[65%] sm:text-right ${valueClass}`}
-      >
-        {value}
-      </span>
-    </div>
-  );
-}
-
-/* =========================================================
-   FEATURE CARD
-========================================================= */
-
-function FeatureCard({
-  icon,
-  title,
-  description,
-  action,
-}: {
-  icon: string;
-  title: string;
-  description: string;
-  action: string;
-}) {
-  return (
-    <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-      <div className="flex items-start gap-4">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-50 font-bold text-[#315b9b]">
-          {icon}
-        </div>
-
-        <div>
-          <h2 className="text-lg font-bold text-[#102a56]">
-            {title}
-          </h2>
-
-          <p className="mt-2 text-sm leading-6 text-slate-500">
-            {description}
-          </p>
-
-          <span className="mt-4 inline-flex rounded-full bg-slate-100 px-3 py-1.5 text-[11px] font-semibold text-slate-500">
-            {action}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* =========================================================
-   METADATA
-========================================================= */
-
-function Metadata({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-2xl bg-slate-50 p-4">
-      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
+    <div className="min-w-0">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
         {label}
       </p>
 
-      <p className="mt-2 text-sm font-semibold text-slate-700">
+      <p className="mt-1 truncate text-sm font-semibold text-slate-800">
         {value}
       </p>
     </div>
   );
 }
 
-/* =========================================================
-   ATTENDANCE LOADING
-========================================================= */
-
-function AttendanceLoading() {
+function MetricCard({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
   return (
-    <div className="space-y-4 p-6">
-      {[1, 2, 3, 4].map((item) => (
-        <div
-          key={item}
-          className="flex animate-pulse items-center justify-between gap-4"
-        >
-          <div className="h-4 w-32 rounded bg-slate-200" />
-          <div className="h-4 w-20 rounded bg-slate-100" />
-          <div className="h-7 w-20 rounded-full bg-slate-100" />
-          <div className="h-4 w-10 rounded bg-slate-100" />
-        </div>
-      ))}
+    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+        {label}
+      </p>
+
+      <p className="mt-2 text-2xl font-bold text-slate-900">
+        {value}
+      </p>
     </div>
   );
-}
-
-/* =========================================================
-   PROFILE LOADING
-========================================================= */
-
-function ProfileLoading() {
-  return (
-    <div className="min-h-screen bg-[#f5f7fb] px-6 py-8 lg:px-8">
-      <div className="mx-auto max-w-[1450px]">
-        <div className="animate-pulse">
-          <div className="mb-6 h-4 w-48 rounded bg-slate-200" />
-
-          <div className="h-48 rounded-3xl bg-slate-300" />
-
-          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            {[1, 2, 3, 4].map((item) => (
-              <div
-                key={item}
-                className="h-32 rounded-2xl bg-white"
-              />
-            ))}
-          </div>
-
-          <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
-            <div className="h-72 rounded-3xl bg-white" />
-            <div className="h-72 rounded-3xl bg-white" />
-          </div>
-
-          <div className="mt-6 h-96 rounded-3xl bg-white" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* =========================================================
-   HELPERS
-========================================================= */
-
-function getAttendanceStats(records: Attendance[]) {
-  const total = records.length;
-
-  const present = records.filter(
-    (record) => record.status.toLowerCase() === "present"
-  ).length;
-
-  const absent = records.filter(
-    (record) => record.status.toLowerCase() === "absent"
-  ).length;
-
-  const percentage =
-    total > 0 ? Math.round((present / total) * 100) : 0;
-
-  return {
-    total,
-    present,
-    absent,
-    percentage,
-  };
-}
-
-function formatDate(value: string) {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function formatDateTime(value: string) {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function getDayName(value: string) {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "-";
-  }
-
-  return date.toLocaleDateString("en-IN", {
-    weekday: "long",
-  });
-}
-
-function capitalize(value: string) {
-  if (!value) return "";
-
-  return value.charAt(0).toUpperCase() + value.slice(1);
 }

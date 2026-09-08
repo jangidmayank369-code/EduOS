@@ -13,6 +13,11 @@ const menuItems = [
     path: "/dashboard/students",
     icon: "♙",
   },
+  { 
+    label: "Parents", 
+    path: "/dashboard/parents", 
+    icon: "♧" 
+  },
   {
     label: "Teachers",
     path: "/dashboard/teachers",
