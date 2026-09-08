@@ -14,36 +14,44 @@ class Parent(Base):
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id"),
         unique=True,
-        nullable=False
+        nullable=False,
     )
 
     first_name: Mapped[str] = mapped_column(
         String(100),
-        nullable=False
+        nullable=False,
     )
 
     last_name: Mapped[str] = mapped_column(
         String(100),
-        nullable=False
+        nullable=False,
     )
 
     phone: Mapped[str | None] = mapped_column(
         String(20),
-        nullable=True
+        nullable=True,
     )
 
     is_active: Mapped[bool] = mapped_column(
         default=True,
-        nullable=False
+        nullable=False,
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        default=datetime.utcnow
+        default=datetime.utcnow,
     )
 
     updated_at: Mapped[datetime] = mapped_column(
         default=datetime.utcnow,
-        onupdate=datetime.utcnow
+        onupdate=datetime.utcnow,
     )
 
-    user = relationship("User")
+    user = relationship(
+        "User",
+    )
+
+    children = relationship(
+        "ParentChild",
+        back_populates="parent",
+        cascade="all, delete-orphan",
+    )

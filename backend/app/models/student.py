@@ -1,9 +1,19 @@
 from datetime import date, datetime
+from enum import Enum
 
-from sqlalchemy import Date, String, ForeignKey
+from sqlalchemy import Date, DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+
+
+class StudentStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    INACTIVE = "INACTIVE"
+    TRANSFERRED = "TRANSFERRED"
+    WITHDRAWN = "WITHDRAWN"
+    PASSED_OUT = "PASSED_OUT"
+    ALUMNI = "ALUMNI"
 
 
 class Student(Base):
@@ -12,16 +22,16 @@ class Student(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
 
     class_id: Mapped[int | None] = mapped_column(
-    ForeignKey("classes.id"),
-    nullable=True
-   )
+        ForeignKey("classes.id"),
+        nullable=True,
+    )
 
     school_class = relationship("SchoolClass")
 
     admission_number: Mapped[str] = mapped_column(
         String(50),
         unique=True,
-        nullable=False
+        nullable=False,
     )
 
     first_name: Mapped[str] = mapped_column(
@@ -64,6 +74,23 @@ class Student(Base):
         nullable=False,
     )
 
+    status: Mapped[StudentStatus] = mapped_column(
+        String(20),
+        default=StudentStatus.ACTIVE,
+        nullable=False,
+    )
+
+    status_changed_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    status_reason: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         default=datetime.utcnow,
     )
@@ -71,4 +98,17 @@ class Student(Base):
     updated_at: Mapped[datetime] = mapped_column(
         default=datetime.utcnow,
         onupdate=datetime.utcnow,
+    )
+
+    status_history = relationship(
+        "StudentStatusHistory",
+        back_populates="student",
+        cascade="all, delete-orphan",
+        order_by="StudentStatusHistory.changed_at.desc()",
+    )
+
+    parents = relationship(
+        "ParentChild",
+        back_populates="student",
+        cascade="all, delete-orphan",
     )

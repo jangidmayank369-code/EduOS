@@ -19,3 +19,8 @@ from app.models.assignment_submission import AssignmentSubmission
 from app.models.notification import Notification
 from app.models.result import Result
 from app.models.academic_session import AcademicSession
+from app.models.student_status_history import StudentStatusHistory
+from app.models.import_job import ImportJob
+from app.models.admission_application import AdmissionApplication
+from app.models.student_enrollment import StudentEnrollment
+from app.models.parent_invitation import ParentInvitation

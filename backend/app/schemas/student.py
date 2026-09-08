@@ -1,7 +1,9 @@
 from datetime import date, datetime
 
 from pydantic import BaseModel, EmailStr, ConfigDict
+
 from app.schemas.school_class import ClassSummary
+
 
 class StudentCreate(BaseModel):
     admission_number: str
@@ -13,6 +15,8 @@ class StudentCreate(BaseModel):
     phone: str | None = None
     address: str | None = None
     class_id: int | None = None
+
+
 class StudentUpdate(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
@@ -23,8 +27,10 @@ class StudentUpdate(BaseModel):
     address: str | None = None
     class_id: int | None = None
 
+
 class StudentResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+
     id: int
     admission_number: str
     first_name: str
@@ -36,6 +42,12 @@ class StudentResponse(BaseModel):
     address: str | None
     class_id: int | None
     school_class: ClassSummary | None = None
+
     is_active: bool
+
+    status: str
+    status_changed_at: datetime
+    status_reason: str | None
+
     created_at: datetime
     updated_at: datetime
