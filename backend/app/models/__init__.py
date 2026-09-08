@@ -18,3 +18,4 @@ from app.models.assignment import Assignment
 from app.models.assignment_submission import AssignmentSubmission
 from app.models.notification import Notification
 from app.models.result import Result
+from app.models.academic_session import AcademicSession

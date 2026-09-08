@@ -21,6 +21,7 @@ from app.api.assignments import router as assignments_router
 from app.api.assignment_submissions import router as assignment_submissions_router
 from app.api.notifications import router as notifications_router
 from app.api.dashboard import router as dashboard_router
+from app.api.academic_sessions import router as academic_sessions_router
 
 app = FastAPI()
 
@@ -55,7 +56,7 @@ app.include_router(assignments_router)
 app.include_router(assignment_submissions_router)
 app.include_router(notifications_router)
 app.include_router(dashboard_router)
-
+app.include_router(academic_sessions_router)
 
 @app.get("/")
 def root():

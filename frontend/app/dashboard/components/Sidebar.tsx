@@ -18,6 +18,11 @@ const menuItems = [
     path: "/dashboard/teachers",
     icon: "♟",
   },
+  { 
+    label: "Academic Sessions", 
+    path: "/dashboard/academic-sessions", 
+    icon: "◷" 
+  },
   {
     label: "Classes",
     path: "/dashboard/classes",
