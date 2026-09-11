@@ -31,7 +31,8 @@ router = APIRouter(
 
 
 # ============================================================
-# CREATE PARENT
+# ADMIN - CREATE PARENT
+# POST /parents/
 # ============================================================
 
 @router.post(
@@ -47,7 +48,7 @@ def create_parent(
         db.query(User)
         .filter(
             User.id == data.user_id,
-            User.is_active == True,
+            User.is_active.is_(True),
         )
         .first()
     )
@@ -93,7 +94,8 @@ def create_parent(
 
 
 # ============================================================
-# GET ALL PARENTS
+# ADMIN - GET ALL PARENTS
+# GET /parents/
 # ============================================================
 
 @router.get(
@@ -107,7 +109,7 @@ def get_parents(
     parents = (
         db.query(Parent)
         .filter(
-            Parent.is_active == True,
+            Parent.is_active.is_(True),
         )
         .all()
     )
@@ -116,7 +118,8 @@ def get_parents(
 
 
 # ============================================================
-# GET SINGLE PARENT
+# ADMIN - GET SINGLE PARENT
+# GET /parents/{parent_id}
 # ============================================================
 
 @router.get(
@@ -132,7 +135,7 @@ def get_parent(
         db.query(Parent)
         .filter(
             Parent.id == parent_id,
-            Parent.is_active == True,
+            Parent.is_active.is_(True),
         )
         .first()
     )
@@ -147,7 +150,93 @@ def get_parent(
 
 
 # ============================================================
-# GET MY CHILDREN
+# ADMIN - UPDATE PARENT
+# PUT /parents/{parent_id}
+# ============================================================
+
+@router.put(
+    "/{parent_id}",
+    response_model=ParentResponse,
+)
+def update_parent(
+    parent_id: int,
+    data: ParentUpdate,
+    current_user: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    parent = (
+        db.query(Parent)
+        .filter(
+            Parent.id == parent_id,
+        )
+        .first()
+    )
+
+    if not parent:
+        raise HTTPException(
+            status_code=404,
+            detail="Parent not found",
+        )
+
+    if data.first_name is not None:
+        parent.first_name = data.first_name
+
+    if data.last_name is not None:
+        parent.last_name = data.last_name
+
+    if data.phone is not None:
+        parent.phone = data.phone
+
+    if data.is_active is not None:
+        parent.is_active = data.is_active
+
+    db.commit()
+    db.refresh(parent)
+
+    return parent
+
+
+# ============================================================
+# ADMIN - DELETE PARENT
+# DELETE /parents/{parent_id}
+# ============================================================
+
+@router.delete(
+    "/{parent_id}",
+)
+def delete_parent(
+    parent_id: int,
+    current_user: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    parent = (
+        db.query(Parent)
+        .filter(
+            Parent.id == parent_id,
+            Parent.is_active.is_(True),
+        )
+        .first()
+    )
+
+    if not parent:
+        raise HTTPException(
+            status_code=404,
+            detail="Parent not found",
+        )
+
+    # Soft delete
+    parent.is_active = False
+
+    db.commit()
+
+    return {
+        "message": "Parent deleted successfully",
+    }
+
+
+# ============================================================
+# PARENT PORTAL - MY CHILDREN
+# GET /parents/me/children
 # ============================================================
 
 @router.get(
@@ -162,7 +251,7 @@ def get_my_children(
         db.query(Parent)
         .filter(
             Parent.user_id == current_user.id,
-            Parent.is_active == True,
+            Parent.is_active.is_(True),
         )
         .first()
     )
@@ -173,7 +262,7 @@ def get_my_children(
             detail="Parent profile not found",
         )
 
-    relationships = (
+    parent_children = (
         db.query(ParentChild)
         .filter(
             ParentChild.parent_id == parent.id,
@@ -181,11 +270,12 @@ def get_my_children(
         .all()
     )
 
-    return relationships
+    return parent_children
 
 
 # ============================================================
-# GET MY CHILD ATTENDANCE
+# PARENT PORTAL - CHILD ATTENDANCE
+# GET /parents/me/children/{student_id}/attendance
 # ============================================================
 
 @router.get(
@@ -200,7 +290,7 @@ def get_my_child_attendance(
         db.query(Parent)
         .filter(
             Parent.user_id == current_user.id,
-            Parent.is_active == True,
+            Parent.is_active.is_(True),
         )
         .first()
     )
@@ -231,7 +321,6 @@ def get_my_child_attendance(
         .filter(
             Attendance.student_id == student_id,
         )
-        .order_by(Attendance.date.desc())
         .all()
     )
 
@@ -239,7 +328,8 @@ def get_my_child_attendance(
 
 
 # ============================================================
-# GET MY CHILD MARKS
+# PARENT PORTAL - CHILD MARKS
+# GET /parents/me/children/{student_id}/marks
 # ============================================================
 
 @router.get(
@@ -254,7 +344,7 @@ def get_my_child_marks(
         db.query(Parent)
         .filter(
             Parent.user_id == current_user.id,
-            Parent.is_active == True,
+            Parent.is_active.is_(True),
         )
         .first()
     )
@@ -285,7 +375,6 @@ def get_my_child_marks(
         .filter(
             Mark.student_id == student_id,
         )
-        .order_by(Mark.exam_id.desc())
         .all()
     )
 
@@ -293,7 +382,8 @@ def get_my_child_marks(
 
 
 # ============================================================
-# GET MY CHILD RESULT
+# PARENT PORTAL - CHILD RESULT
+# GET /parents/me/children/{student_id}/results/{exam_id}
 # ============================================================
 
 @router.get(
@@ -309,7 +399,7 @@ def get_my_child_result(
         db.query(Parent)
         .filter(
             Parent.user_id == current_user.id,
-            Parent.is_active == True,
+            Parent.is_active.is_(True),
         )
         .first()
     )
@@ -335,113 +425,16 @@ def get_my_child_result(
             detail="You are not authorized to view this student's result",
         )
 
-    marks = (
-        db.query(Mark)
-        .filter(
-            Mark.student_id == student_id,
-            Mark.exam_id == exam_id,
-        )
-        .all()
-    )
-
-    if not marks:
-        raise HTTPException(
-            status_code=404,
-            detail="No marks found for this student and exam",
-        )
-
     return build_result_response(
-        student_id,
-        exam_id,
-        marks,
+        db=db,
+        student_id=student_id,
+        exam_id=exam_id,
     )
 
 
 # ============================================================
-# UPDATE PARENT
-# ============================================================
-
-@router.put(
-    "/{parent_id}",
-    response_model=ParentResponse,
-)
-def update_parent(
-    parent_id: int,
-    data: ParentUpdate,
-    current_user: User = Depends(require_role("admin")),
-    db: Session = Depends(get_db),
-):
-    parent = (
-        db.query(Parent)
-        .filter(
-            Parent.id == parent_id,
-            Parent.is_active == True,
-        )
-        .first()
-    )
-
-    if not parent:
-        raise HTTPException(
-            status_code=404,
-            detail="Parent not found",
-        )
-
-    if data.first_name is not None:
-        parent.first_name = data.first_name
-
-    if data.last_name is not None:
-        parent.last_name = data.last_name
-
-    if data.phone is not None:
-        parent.phone = data.phone
-
-    if data.is_active is not None:
-        parent.is_active = data.is_active
-
-    db.commit()
-    db.refresh(parent)
-
-    return parent
-
-
-# ============================================================
-# DELETE PARENT
-# ============================================================
-
-@router.delete(
-    "/{parent_id}",
-)
-def delete_parent(
-    parent_id: int,
-    current_user: User = Depends(require_role("admin")),
-    db: Session = Depends(get_db),
-):
-    parent = (
-        db.query(Parent)
-        .filter(
-            Parent.id == parent_id,
-            Parent.is_active == True,
-        )
-        .first()
-    )
-
-    if not parent:
-        raise HTTPException(
-            status_code=404,
-            detail="Parent not found",
-        )
-
-    parent.is_active = False
-
-    db.commit()
-
-    return {
-        "message": "Parent deleted successfully",
-    }
-
-
-# ============================================================
-# GET MY CHILD FEE SUMMARY
+# PARENT PORTAL - CHILD FEE SUMMARY
+# GET /parents/me/children/{student_id}/fees/summary
 # ============================================================
 
 @router.get(
@@ -457,7 +450,7 @@ def get_my_child_fee_summary(
         db.query(Parent)
         .filter(
             Parent.user_id == current_user.id,
-            Parent.is_active == True,
+            Parent.is_active.is_(True),
         )
         .first()
     )

@@ -1,7 +1,8 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+
+const API_BASE = "http://127.0.0.1:8000";
 
 type Parent = {
   id: number;
@@ -14,12 +15,14 @@ type Parent = {
   updated_at: string;
 };
 
-type Child = {
+type Student = {
   id: number;
   admission_number: string;
   first_name: string;
   last_name: string;
   class_id: number | null;
+  is_active?: boolean;
+  status?: string;
 };
 
 type ParentChild = {
@@ -29,14 +32,37 @@ type ParentChild = {
   is_primary: boolean;
   is_emergency_contact: boolean;
   receives_notifications: boolean;
-  created_at: string;
-  updated_at: string;
-  student: Child | null;
+  created_at?: string;
+  updated_at?: string;
+  student?: {
+    id: number;
+    admission_number: string;
+    first_name: string;
+    last_name: string;
+    class_id: number | null;
+  } | null;
 };
 
-const API_URL = "http://127.0.0.1:8000";
+type ParentForm = {
+  user_id: string;
+  first_name: string;
+  last_name: string;
+  phone: string;
+};
 
-const relationOptions = [
+type ChildForm = {
+  student_id: string;
+  relation_type: string;
+  is_primary: boolean;
+  is_emergency_contact: boolean;
+  receives_notifications: boolean;
+};
+
+type Mode = "view" | "create" | "edit";
+
+type ChildMode = "none" | "create" | "edit";
+
+const RELATIONS = [
   "FATHER",
   "MOTHER",
   "GUARDIAN",
@@ -45,331 +71,528 @@ const relationOptions = [
   "OTHER",
 ];
 
-export default function ParentsPage() {
-  const router = useRouter();
+function getToken() {
+  if (typeof window === "undefined") {
+    return null;
+  }
 
-  const [parents, setParents] = useState<Parent[]>([]);
-  const [students, setStudents] = useState<Child[]>([]);
-  const [selectedParent, setSelectedParent] = useState<Parent | null>(null);
-  const [children, setChildren] = useState<ParentChild[]>([]);
+  return localStorage.getItem("access_token");
+}
 
-  const [search, setSearch] = useState("");
+function formatDate(value?: string) {
+  if (!value) {
+    return "—";
+  }
 
-  const [loading, setLoading] = useState(true);
-  const [childrenLoading, setChildrenLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const date = new Date(value);
 
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
 
-  const [showParentModal, setShowParentModal] = useState(false);
-  const [showChildModal, setShowChildModal] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [showUnlinkModal, setShowUnlinkModal] = useState(false);
+  return date.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
 
-  const [editingParent, setEditingParent] = useState<Parent | null>(null);
-  const [relationshipToRemove, setRelationshipToRemove] =
-    useState<ParentChild | null>(null);
+function getInitials(parent: Parent) {
+  return `${parent.first_name?.[0] || ""}${
+    parent.last_name?.[0] || ""
+  }`.toUpperCase();
+}
 
-  const [parentForm, setParentForm] = useState({
+function emptyParentForm(): ParentForm {
+  return {
     user_id: "",
     first_name: "",
     last_name: "",
     phone: "",
-    is_active: true,
-  });
+  };
+}
 
-  const [childForm, setChildForm] = useState({
+function emptyChildForm(): ChildForm {
+  return {
     student_id: "",
     relation_type: "GUARDIAN",
     is_primary: false,
     is_emergency_contact: false,
     receives_notifications: true,
-  });
-
-  const token =
-    typeof window !== "undefined"
-      ? localStorage.getItem("access_token")
-      : null;
-
-  const authHeaders = useMemo(
-    () => ({
-      Authorization: `Bearer ${token ?? ""}`,
-      "Content-Type": "application/json",
-    }),
-    [token]
-  );
-
-  const handleUnauthorized = () => {
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("user_role");
-    router.push("/login");
   };
+}
 
-  const clearMessages = () => {
-    setError("");
-    setSuccess("");
-  };
+export default function ParentsAdminPage() {
+  const [parents, setParents] = useState<Parent[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [children, setChildren] = useState<ParentChild[]>([]);
 
-  const handleResponseError = async (response: Response) => {
-    if (response.status === 401) {
-      handleUnauthorized();
-      throw new Error("Session expired");
+  const [selectedParent, setSelectedParent] =
+    useState<Parent | null>(null);
+
+  const [selectedChild, setSelectedChild] =
+    useState<ParentChild | null>(null);
+
+  const [mode, setMode] = useState<Mode>("view");
+  const [childMode, setChildMode] =
+    useState<ChildMode>("none");
+
+  const [form, setForm] =
+    useState<ParentForm>(emptyParentForm());
+
+  const [childForm, setChildForm] =
+    useState<ChildForm>(emptyChildForm());
+
+  const [search, setSearch] = useState("");
+  const [studentSearch, setStudentSearch] = useState("");
+
+  const [loading, setLoading] = useState(true);
+  const [loadingDetails, setLoadingDetails] =
+    useState(false);
+  const [loadingChildren, setLoadingChildren] =
+    useState(false);
+  const [loadingStudents, setLoadingStudents] =
+    useState(false);
+
+  const [saving, setSaving] = useState(false);
+  const [savingChild, setSavingChild] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [unlinkingStudentId, setUnlinkingStudentId] =
+    useState<number | null>(null);
+
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  const readError = async (
+    response: Response,
+    fallback: string,
+  ) => {
+    const body = await response.json().catch(() => null);
+
+    if (typeof body?.detail === "string") {
+      return body.detail;
     }
 
-    let message = "Something went wrong.";
-
-    try {
-      const data = await response.json();
-
-      if (typeof data?.detail === "string") {
-        message = data.detail;
-      } else if (Array.isArray(data?.detail)) {
-        message = data.detail
-          .map((item: { msg?: string }) => item.msg)
-          .filter(Boolean)
-          .join(", ");
-      }
-    } catch {
-      // Keep fallback message.
+    if (Array.isArray(body?.detail)) {
+      return body.detail
+        .map(
+          (item: { msg?: string }) =>
+            item.msg || "Validation error",
+        )
+        .join(", ");
     }
 
-    throw new Error(message);
+    return fallback;
   };
+
+  const apiFetch = async (
+    path: string,
+    options: RequestInit = {},
+  ) => {
+    const token = getToken();
+
+    if (!token) {
+      throw new Error(
+        "Authentication token not found. Please login again.",
+      );
+    }
+
+    const headers = new Headers(options.headers);
+
+    headers.set("Authorization", `Bearer ${token}`);
+
+    if (options.body && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+
+    return fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers,
+    });
+  };
+
+  /* ============================================================
+     PARENTS
+     ============================================================ */
 
   const loadParents = async () => {
     try {
       setLoading(true);
       setError("");
 
-      const response = await fetch(`${API_URL}/parents/`, {
-        headers: authHeaders,
-      });
+      const response = await apiFetch("/parents/");
+
+      if (response.status === 401) {
+        throw new Error(
+          "Your session has expired. Please login again.",
+        );
+      }
+
+      if (response.status === 403) {
+        throw new Error(
+          "You do not have permission to manage parents.",
+        );
+      }
 
       if (!response.ok) {
-        await handleResponseError(response);
-        return;
+        throw new Error(
+          await readError(
+            response,
+            "Unable to load parents.",
+          ),
+        );
       }
 
-      const data = await response.json();
-      setParents(data);
+      const data: Parent[] = await response.json();
+
+      setParents(Array.isArray(data) ? data : []);
     } catch (err) {
-      if (err instanceof Error && err.message !== "Session expired") {
-        setError(err.message);
-      }
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to load parents.",
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  const loadStudents = async () => {
+  const loadParent = async (parentId: number) => {
     try {
-      const response = await fetch(`${API_URL}/students/`, {
-        headers: authHeaders,
-      });
-
-      if (!response.ok) {
-        await handleResponseError(response);
-        return;
-      }
-
-      const data = await response.json();
-      setStudents(data);
-    } catch {
-      // Parent page can still render even if student loading fails.
-    }
-  };
-
-  const loadChildren = async (parent: Parent) => {
-    try {
-      setChildrenLoading(true);
+      setLoadingDetails(true);
       setError("");
 
-      const response = await fetch(
-        `${API_URL}/parent-children/parent/${parent.id}`,
-        {
-          headers: authHeaders,
-        }
+      const response = await apiFetch(
+        `/parents/${parentId}`,
       );
 
       if (!response.ok) {
-        await handleResponseError(response);
-        return;
+        throw new Error(
+          await readError(
+            response,
+            "Unable to load parent details.",
+          ),
+        );
       }
 
-      const data = await response.json();
+      const data: Parent = await response.json();
 
-      setChildren(data);
+      setSelectedParent(data);
+
+      setForm({
+        user_id: String(data.user_id),
+        first_name: data.first_name || "",
+        last_name: data.last_name || "",
+        phone: data.phone || "",
+      });
     } catch (err) {
-      if (err instanceof Error && err.message !== "Session expired") {
-        setError(err.message);
-      }
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to load parent details.",
+      );
     } finally {
-      setChildrenLoading(false);
+      setLoadingDetails(false);
+    }
+  };
+
+  /* ============================================================
+     STUDENTS
+     ============================================================ */
+
+  const loadStudents = async () => {
+    try {
+      setLoadingStudents(true);
+
+      const response = await apiFetch("/students/");
+
+      if (!response.ok) {
+        throw new Error(
+          await readError(
+            response,
+            "Unable to load students.",
+          ),
+        );
+      }
+
+      const data: Student[] = await response.json();
+
+      setStudents(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to load students.",
+      );
+    } finally {
+      setLoadingStudents(false);
+    }
+  };
+
+  /* ============================================================
+     CHILDREN
+     ============================================================ */
+
+  const loadChildren = async (parentId: number) => {
+    try {
+      setLoadingChildren(true);
+
+      const response = await apiFetch(
+        `/parent-children/parent/${parentId}`,
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          await readError(
+            response,
+            "Unable to load linked children.",
+          ),
+        );
+      }
+
+      const data: ParentChild[] = await response.json();
+
+      setChildren(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to load linked children.",
+      );
+    } finally {
+      setLoadingChildren(false);
     }
   };
 
   useEffect(() => {
-    if (!token) {
-      router.push("/login");
-      return;
-    }
-
     loadParents();
     loadStudents();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const filteredParents = parents.filter((parent) => {
-    const query = search.toLowerCase().trim();
+  /* ============================================================
+     FILTERS
+     ============================================================ */
+
+  const filteredParents = useMemo(() => {
+    const query = search.trim().toLowerCase();
 
     if (!query) {
-      return true;
+      return parents;
     }
 
-    return (
-      `${parent.first_name} ${parent.last_name}`
-        .toLowerCase()
-        .includes(query) ||
-      String(parent.user_id).includes(query) ||
-      (parent.phone ?? "").toLowerCase().includes(query)
+    return parents.filter((parent) => {
+      const fullName =
+        `${parent.first_name} ${parent.last_name}`.toLowerCase();
+
+      return (
+        fullName.includes(query) ||
+        String(parent.id).includes(query) ||
+        String(parent.user_id).includes(query) ||
+        (parent.phone || "")
+          .toLowerCase()
+          .includes(query)
+      );
+    });
+  }, [parents, search]);
+
+  const linkedStudentIds = useMemo(() => {
+    return new Set(
+      children.map((child) => child.student_id),
     );
-  });
+  }, [children]);
 
-  const openCreateParent = () => {
-    clearMessages();
+  const availableStudents = useMemo(() => {
+    const query = studentSearch.trim().toLowerCase();
 
-    setEditingParent(null);
+    return students.filter((student) => {
+      if (
+        childMode === "create" &&
+        linkedStudentIds.has(student.id)
+      ) {
+        return false;
+      }
 
-    setParentForm({
-      user_id: "",
-      first_name: "",
-      last_name: "",
-      phone: "",
-      is_active: true,
+      if (!query) {
+        return true;
+      }
+
+      const fullName =
+        `${student.first_name} ${student.last_name}`.toLowerCase();
+
+      return (
+        fullName.includes(query) ||
+        student.admission_number
+          .toLowerCase()
+          .includes(query) ||
+        String(student.id).includes(query)
+      );
     });
+  }, [
+    students,
+    studentSearch,
+    childMode,
+    linkedStudentIds,
+  ]);
 
-    setShowParentModal(true);
+  /* ============================================================
+     PARENT UI ACTIONS
+     ============================================================ */
+
+  const openCreate = () => {
+    setSelectedParent(null);
+    setSelectedChild(null);
+
+    setMode("create");
+    setChildMode("none");
+
+    setForm(emptyParentForm());
+    setChildForm(emptyChildForm());
+
+    setChildren([]);
+
+    setError("");
+    setSuccess("");
   };
 
-  const openEditParent = (parent: Parent) => {
-    clearMessages();
+  const openView = async (parent: Parent) => {
+    setMode("view");
+    setChildMode("none");
 
-    setEditingParent(parent);
+    setSelectedParent(parent);
+    setSelectedChild(null);
 
-    setParentForm({
-      user_id: String(parent.user_id),
-      first_name: parent.first_name,
-      last_name: parent.last_name,
-      phone: parent.phone ?? "",
-      is_active: parent.is_active,
-    });
+    setError("");
+    setSuccess("");
 
-    setShowParentModal(true);
+    await Promise.all([
+      loadParent(parent.id),
+      loadChildren(parent.id),
+    ]);
   };
 
-  const handleParentSubmit = async (event: FormEvent) => {
+  const openEdit = async (parent: Parent) => {
+    setMode("edit");
+    setChildMode("none");
+
+    setSelectedParent(parent);
+    setSelectedChild(null);
+
+    setError("");
+    setSuccess("");
+
+    await Promise.all([
+      loadParent(parent.id),
+      loadChildren(parent.id),
+    ]);
+  };
+
+  const closePanel = () => {
+    setMode("view");
+    setChildMode("none");
+
+    setSelectedParent(null);
+    setSelectedChild(null);
+
+    setForm(emptyParentForm());
+    setChildForm(emptyChildForm());
+
+    setChildren([]);
+
+    setError("");
+    setSuccess("");
+  };
+
+  const handleFormChange = (
+    field: keyof ParentForm,
+    value: string,
+  ) => {
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  };
+
+  /* ============================================================
+     CREATE PARENT
+     ============================================================ */
+
+  const handleCreate = async (event: FormEvent) => {
     event.preventDefault();
 
     try {
       setSaving(true);
-      clearMessages();
+      setError("");
+      setSuccess("");
 
-      if (!parentForm.first_name.trim()) {
+      const userId = Number(form.user_id);
+
+      if (!userId || userId <= 0) {
+        setError("Please enter a valid User ID.");
+        return;
+      }
+
+      if (!form.first_name.trim()) {
         setError("First name is required.");
         return;
       }
 
-      if (!parentForm.last_name.trim()) {
+      if (!form.last_name.trim()) {
         setError("Last name is required.");
         return;
       }
 
-      if (!editingParent && !parentForm.user_id.trim()) {
-        setError("User ID is required for a new parent.");
-        return;
-      }
-
-      const payload = editingParent
-        ? {
-            first_name: parentForm.first_name.trim(),
-            last_name: parentForm.last_name.trim(),
-            phone: parentForm.phone.trim() || null,
-            is_active: parentForm.is_active,
-          }
-        : {
-            user_id: Number(parentForm.user_id),
-            first_name: parentForm.first_name.trim(),
-            last_name: parentForm.last_name.trim(),
-            phone: parentForm.phone.trim() || null,
-          };
-
-      const response = await fetch(
-        editingParent
-          ? `${API_URL}/parents/${editingParent.id}`
-          : `${API_URL}/parents/`,
-        {
-          method: editingParent ? "PUT" : "POST",
-          headers: authHeaders,
-          body: JSON.stringify(payload),
-        }
-      );
+      const response = await apiFetch("/parents/", {
+        method: "POST",
+        body: JSON.stringify({
+          user_id: userId,
+          first_name: form.first_name.trim(),
+          last_name: form.last_name.trim(),
+          phone: form.phone.trim() || null,
+        }),
+      });
 
       if (!response.ok) {
-        await handleResponseError(response);
-        return;
+        throw new Error(
+          await readError(
+            response,
+            "Unable to create parent.",
+          ),
+        );
       }
 
-      const savedParent: Parent = await response.json();
+      const created: Parent = await response.json();
 
-      setSuccess(
-        editingParent
-          ? "Parent updated successfully."
-          : "Parent created successfully."
-      );
+      setParents((current) => [created, ...current]);
 
-      setShowParentModal(false);
+      setSelectedParent(created);
+      setMode("view");
 
-      await loadParents();
+      setForm({
+        user_id: String(created.user_id),
+        first_name: created.first_name,
+        last_name: created.last_name,
+        phone: created.phone || "",
+      });
 
-      if (selectedParent?.id === savedParent.id) {
-        setSelectedParent(savedParent);
-        await loadChildren(savedParent);
-      }
+      setChildren([]);
+
+      setSuccess("Parent created successfully.");
     } catch (err) {
-      if (err instanceof Error && err.message !== "Session expired") {
-        setError(err.message);
-      }
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to create parent.",
+      );
     } finally {
       setSaving(false);
     }
   };
 
-  const openParentDetails = async (parent: Parent) => {
-    clearMessages();
-    setSelectedParent(parent);
-    await loadChildren(parent);
-  };
+  /* ============================================================
+     UPDATE PARENT
+     ============================================================ */
 
-  const openChildModal = () => {
-    if (!selectedParent) {
-      return;
-    }
-
-    clearMessages();
-
-    setChildForm({
-      student_id: "",
-      relation_type: "GUARDIAN",
-      is_primary: false,
-      is_emergency_contact: false,
-      receives_notifications: true,
-    });
-
-    setShowChildModal(true);
-  };
-
-  const handleChildSubmit = async (event: FormEvent) => {
+  const handleUpdate = async (event: FormEvent) => {
     event.preventDefault();
 
     if (!selectedParent) {
@@ -378,228 +601,506 @@ export default function ParentsPage() {
 
     try {
       setSaving(true);
-      clearMessages();
+      setError("");
+      setSuccess("");
 
-      if (!childForm.student_id) {
-        setError("Please select a student.");
+      if (!form.first_name.trim()) {
+        setError("First name is required.");
         return;
       }
 
-      const payload = {
-        parent_id: selectedParent.id,
-        student_id: Number(childForm.student_id),
-        relation_type: childForm.relation_type,
-        is_primary: childForm.is_primary,
-        is_emergency_contact: childForm.is_emergency_contact,
-        receives_notifications: childForm.receives_notifications,
-      };
-
-      const response = await fetch(`${API_URL}/parent-children/`, {
-        method: "POST",
-        headers: authHeaders,
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        await handleResponseError(response);
+      if (!form.last_name.trim()) {
+        setError("Last name is required.");
         return;
       }
 
-      setSuccess("Child linked to parent successfully.");
-      setShowChildModal(false);
-
-      await loadChildren(selectedParent);
-    } catch (err) {
-      if (err instanceof Error && err.message !== "Session expired") {
-        setError(err.message);
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const updateRelationship = async (
-    relationship: ParentChild,
-    changes: Partial<{
-      relation_type: string;
-      is_primary: boolean;
-      is_emergency_contact: boolean;
-      receives_notifications: boolean;
-    }>
-  ) => {
-    try {
-      clearMessages();
-
-      const response = await fetch(
-        `${API_URL}/parent-children/${relationship.parent_id}/${relationship.student_id}`,
+      const response = await apiFetch(
+        `/parents/${selectedParent.id}`,
         {
           method: "PUT",
-          headers: authHeaders,
-          body: JSON.stringify(changes),
-        }
+          body: JSON.stringify({
+            first_name: form.first_name.trim(),
+            last_name: form.last_name.trim(),
+            phone: form.phone.trim() || null,
+          }),
+        },
       );
 
       if (!response.ok) {
-        await handleResponseError(response);
-        return;
+        throw new Error(
+          await readError(
+            response,
+            "Unable to update parent.",
+          ),
+        );
       }
 
-      setSuccess("Relationship updated successfully.");
+      const updated: Parent = await response.json();
 
-      if (selectedParent) {
-        await loadChildren(selectedParent);
-      }
-    } catch (err) {
-      if (err instanceof Error && err.message !== "Session expired") {
-        setError(err.message);
-      }
-    }
-  };
-
-  const confirmUnlink = (relationship: ParentChild) => {
-    clearMessages();
-    setRelationshipToRemove(relationship);
-    setShowUnlinkModal(true);
-  };
-
-  const handleUnlink = async () => {
-    if (!relationshipToRemove) {
-      return;
-    }
-
-    try {
-      setSaving(true);
-      clearMessages();
-
-      const response = await fetch(
-        `${API_URL}/parent-children/${relationshipToRemove.parent_id}/${relationshipToRemove.student_id}`,
-        {
-          method: "DELETE",
-          headers: authHeaders,
-        }
+      setParents((current) =>
+        current.map((parent) =>
+          parent.id === updated.id ? updated : parent,
+        ),
       );
 
-      if (!response.ok) {
-        await handleResponseError(response);
-        return;
-      }
+      setSelectedParent(updated);
+      setMode("view");
 
-      setSuccess("Parent-child relationship removed successfully.");
-      setShowUnlinkModal(false);
-      setRelationshipToRemove(null);
-
-      if (selectedParent) {
-        await loadChildren(selectedParent);
-      }
+      setSuccess("Parent updated successfully.");
     } catch (err) {
-      if (err instanceof Error && err.message !== "Session expired") {
-        setError(err.message);
-      }
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to update parent.",
+      );
     } finally {
       setSaving(false);
     }
   };
 
-  const confirmDeactivate = (parent: Parent) => {
-    clearMessages();
-    setEditingParent(parent);
-    setShowDeleteModal(true);
-  };
+  /* ============================================================
+     DEACTIVATE PARENT
+     ============================================================ */
 
-  const handleDeactivate = async () => {
-    if (!editingParent) {
+  const handleDelete = async () => {
+    if (!selectedParent) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Deactivate parent "${selectedParent.first_name} ${selectedParent.last_name}"?`,
+    );
+
+    if (!confirmed) {
       return;
     }
 
     try {
-      setSaving(true);
-      clearMessages();
+      setDeleting(true);
+      setError("");
+      setSuccess("");
 
-      const response = await fetch(
-        `${API_URL}/parents/${editingParent.id}`,
+      const response = await apiFetch(
+        `/parents/${selectedParent.id}`,
         {
           method: "DELETE",
-          headers: authHeaders,
-        }
+        },
       );
 
       if (!response.ok) {
-        await handleResponseError(response);
-        return;
+        throw new Error(
+          await readError(
+            response,
+            "Unable to deactivate parent.",
+          ),
+        );
       }
+
+      setParents((current) =>
+        current.filter(
+          (parent) => parent.id !== selectedParent.id,
+        ),
+      );
+
+      setSelectedParent(null);
+      setSelectedChild(null);
+      setChildren([]);
+
+      setMode("view");
+      setChildMode("none");
 
       setSuccess("Parent deactivated successfully.");
-      setShowDeleteModal(false);
-
-      if (selectedParent?.id === editingParent.id) {
-        setSelectedParent(null);
-        setChildren([]);
-      }
-
-      setEditingParent(null);
-
-      await loadParents();
     } catch (err) {
-      if (err instanceof Error && err.message !== "Session expired") {
-        setError(err.message);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to deactivate parent.",
+      );
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  /* ============================================================
+     REACTIVATE PARENT
+     ============================================================ */
+
+  const handleReactivate = async () => {
+    if (!selectedParent) {
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setError("");
+      setSuccess("");
+
+      const response = await apiFetch(
+        `/parents/${selectedParent.id}`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            is_active: true,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          await readError(
+            response,
+            "Unable to reactivate parent.",
+          ),
+        );
       }
+
+      const updated: Parent = await response.json();
+
+      setSelectedParent(updated);
+
+      setParents((current) =>
+        current.some(
+          (parent) => parent.id === updated.id,
+        )
+          ? current.map((parent) =>
+              parent.id === updated.id ? updated : parent,
+            )
+          : [updated, ...current],
+      );
+
+      setSuccess("Parent reactivated successfully.");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to reactivate parent.",
+      );
     } finally {
       setSaving(false);
     }
   };
 
-  const totalParents = parents.length;
+  /* ============================================================
+     CHILD UI
+     ============================================================ */
 
-  const parentsWithChildren = new Set(
-    parents
-      .filter((parent) => selectedParent?.id === parent.id)
-      .map((parent) => parent.id)
-  );
+  const openLinkChild = async () => {
+    if (!selectedParent) {
+      return;
+    }
 
-  const primaryChildrenCount = children.filter(
-    (child) => child.is_primary
-  ).length;
+    setChildMode("create");
+    setSelectedChild(null);
+    setChildForm(emptyChildForm());
+    setStudentSearch("");
+    setError("");
+    setSuccess("");
 
-  const emergencyContactsCount = children.filter(
-    (child) => child.is_emergency_contact
-  ).length;
+    if (students.length === 0) {
+      await loadStudents();
+    }
+  };
+
+  const openEditChild = (relationship: ParentChild) => {
+    setSelectedChild(relationship);
+
+    setChildMode("edit");
+
+    setChildForm({
+      student_id: String(relationship.student_id),
+      relation_type:
+        relationship.relation_type || "GUARDIAN",
+      is_primary: relationship.is_primary,
+      is_emergency_contact:
+        relationship.is_emergency_contact,
+      receives_notifications:
+        relationship.receives_notifications,
+    });
+
+    setStudentSearch("");
+    setError("");
+    setSuccess("");
+  };
+
+  const closeChildForm = () => {
+    setChildMode("none");
+    setSelectedChild(null);
+    setChildForm(emptyChildForm());
+    setStudentSearch("");
+  };
+
+  const handleChildFormChange = (
+    field: keyof ChildForm,
+    value: string | boolean,
+  ) => {
+    setChildForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  };
+
+  /* ============================================================
+     LINK CHILD
+     ============================================================ */
+
+  const handleLinkChild = async (
+    event: FormEvent,
+  ) => {
+    event.preventDefault();
+
+    if (!selectedParent) {
+      return;
+    }
+
+    const studentId = Number(childForm.student_id);
+
+    if (!studentId || studentId <= 0) {
+      setError("Please select a student.");
+      return;
+    }
+
+    try {
+      setSavingChild(true);
+      setError("");
+      setSuccess("");
+
+      const response = await apiFetch(
+        "/parent-children/",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            parent_id: selectedParent.id,
+            student_id: studentId,
+            relation_type:
+              childForm.relation_type.toUpperCase(),
+            is_primary: childForm.is_primary,
+            is_emergency_contact:
+              childForm.is_emergency_contact,
+            receives_notifications:
+              childForm.receives_notifications,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          await readError(
+            response,
+            "Unable to link student.",
+          ),
+        );
+      }
+
+      const created: ParentChild =
+        await response.json();
+
+      setChildren((current) => [
+        ...current,
+        created,
+      ]);
+
+      setChildMode("none");
+      setSelectedChild(null);
+      setChildForm(emptyChildForm());
+
+      setSuccess(
+        "Student linked to parent successfully.",
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to link student.",
+      );
+    } finally {
+      setSavingChild(false);
+    }
+  };
+
+  /* ============================================================
+     UPDATE CHILD RELATIONSHIP
+     ============================================================ */
+
+  const handleUpdateChild = async (
+    event: FormEvent,
+  ) => {
+    event.preventDefault();
+
+    if (!selectedParent || !selectedChild) {
+      return;
+    }
+
+    try {
+      setSavingChild(true);
+      setError("");
+      setSuccess("");
+
+      const response = await apiFetch(
+        `/parent-children/${selectedParent.id}/${selectedChild.student_id}`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            relation_type:
+              childForm.relation_type.toUpperCase(),
+            is_primary: childForm.is_primary,
+            is_emergency_contact:
+              childForm.is_emergency_contact,
+            receives_notifications:
+              childForm.receives_notifications,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          await readError(
+            response,
+            "Unable to update relationship.",
+          ),
+        );
+      }
+
+      const updated: ParentChild =
+        await response.json();
+
+      setChildren((current) =>
+        current.map((child) =>
+          child.parent_id ===
+            updated.parent_id &&
+          child.student_id === updated.student_id
+            ? updated
+            : child,
+        ),
+      );
+
+      setChildMode("none");
+      setSelectedChild(null);
+
+      setSuccess(
+        "Parent-child relationship updated.",
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to update relationship.",
+      );
+    } finally {
+      setSavingChild(false);
+    }
+  };
+
+  /* ============================================================
+     UNLINK CHILD
+     ============================================================ */
+
+  const handleUnlinkChild = async (
+    relationship: ParentChild,
+  ) => {
+    if (!selectedParent) {
+      return;
+    }
+
+    const studentName = relationship.student
+      ? `${relationship.student.first_name} ${relationship.student.last_name}`
+      : `Student #${relationship.student_id}`;
+
+    const confirmed = window.confirm(
+      `Unlink "${studentName}" from this parent?`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setUnlinkingStudentId(
+        relationship.student_id,
+      );
+
+      setError("");
+      setSuccess("");
+
+      const response = await apiFetch(
+        `/parent-children/${selectedParent.id}/${relationship.student_id}`,
+        {
+          method: "DELETE",
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          await readError(
+            response,
+            "Unable to unlink student.",
+          ),
+        );
+      }
+
+      setChildren((current) =>
+        current.filter(
+          (child) =>
+            child.student_id !==
+            relationship.student_id,
+        ),
+      );
+
+      setSuccess(
+        "Student unlinked from parent successfully.",
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to unlink student.",
+      );
+    } finally {
+      setUnlinkingStudentId(null);
+    }
+  };
+
+  /* ============================================================
+     RENDER
+     ============================================================ */
 
   return (
-    <div className="min-h-screen bg-[#f5f7fb]">
-      <div className="mx-auto max-w-[1600px] p-4 sm:p-6 lg:p-8">
-        {/* Header */}
+    <main className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl">
+        {/* HEADER */}
         <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
-              <span className="h-2 w-2 rounded-full bg-blue-600" />
-              Family Management
-            </div>
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-600">
+              Administration
+            </p>
 
-            <h1 className="text-2xl font-bold tracking-tight text-[#102A56] sm:text-3xl">
-              Parents & Guardians
+            <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">
+              Parent Management
             </h1>
 
-            <p className="mt-1 max-w-2xl text-sm text-slate-500">
-              Manage parent accounts, family relationships, emergency contacts
-              and communication preferences.
+            <p className="mt-1 text-sm text-slate-500">
+              View, create, edit, deactivate parents and manage
+              their linked students.
             </p>
           </div>
 
           <button
-            onClick={openCreateParent}
-            className="rounded-xl bg-[#102A56] px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-900/15 transition hover:bg-[#17396f]"
+            type="button"
+            onClick={openCreate}
+            className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700"
           >
             + Add Parent
           </button>
         </div>
 
-        {/* Messages */}
+        {/* ALERTS */}
         {error && (
-          <div className="mb-5 flex items-start justify-between gap-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div className="mb-5 flex items-start justify-between gap-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
             <span>{error}</span>
+
             <button
+              type="button"
               onClick={() => setError("")}
-              className="font-bold text-red-500"
+              className="font-bold"
             >
               ×
             </button>
@@ -607,759 +1108,1110 @@ export default function ParentsPage() {
         )}
 
         {success && (
-          <div className="mb-5 flex items-start justify-between gap-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          <div className="mb-5 flex items-start justify-between gap-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
             <span>{success}</span>
+
             <button
+              type="button"
               onClick={() => setSuccess("")}
-              className="font-bold text-emerald-600"
+              className="font-bold"
             >
               ×
             </button>
           </div>
         )}
 
-        {/* Stats */}
-        <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {/* STATS */}
+        <div className="mb-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <p className="text-sm font-medium text-slate-500">
               Active Parents
             </p>
-            <p className="mt-2 text-3xl font-bold text-[#102A56]">
-              {totalParents}
+
+            <p className="mt-2 text-3xl font-bold text-slate-950">
+              {parents.length}
             </p>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <p className="text-sm font-medium text-slate-500">
+              Search Results
+            </p>
+
+            <p className="mt-2 text-3xl font-bold text-blue-600">
+              {filteredParents.length}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-sm font-medium text-slate-500">
               Linked Children
             </p>
-            <p className="mt-2 text-3xl font-bold text-[#102A56]">
-              {selectedParent ? children.length : "—"}
-            </p>
-          </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Primary Contacts
-            </p>
-            <p className="mt-2 text-3xl font-bold text-[#102A56]">
-              {selectedParent ? primaryChildrenCount : "—"}
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Emergency Contacts
-            </p>
-            <p className="mt-2 text-3xl font-bold text-[#102A56]">
-              {selectedParent ? emergencyContactsCount : "—"}
+            <p className="mt-2 text-3xl font-bold text-emerald-600">
+              {children.length}
             </p>
           </div>
         </div>
 
-        {/* Main layout */}
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_430px]">
-          {/* Parent list */}
-          <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-100 p-5">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h2 className="font-bold text-[#102A56]">Parent Directory</h2>
-                  <p className="mt-1 text-xs text-slate-400">
-                    Select a parent to manage their children.
-                  </p>
-                </div>
+        {/* PARENTS TABLE */}
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-4 border-b border-slate-200 p-5 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="font-bold text-slate-950">
+                Parents
+              </h2>
 
-                <div className="relative w-full sm:w-64">
-                  <input
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Search parents..."
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:bg-white"
-                  />
-                </div>
-              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                All currently active parent profiles.
+              </p>
             </div>
 
-            {loading ? (
-              <div className="p-10 text-center text-sm text-slate-400">
-                Loading parents...
-              </div>
-            ) : filteredParents.length === 0 ? (
-              <div className="p-10 text-center">
-                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-2xl">
-                  👨‍👩‍👧
-                </div>
-                <p className="mt-4 font-semibold text-slate-700">
-                  No parents found
-                </p>
-                <p className="mt-1 text-sm text-slate-400">
-                  Add a parent or change your search.
-                </p>
-              </div>
-            ) : (
-              <div className="divide-y divide-slate-100">
-                {filteredParents.map((parent) => {
-                  const selected = selectedParent?.id === parent.id;
+            <div className="w-full md:max-w-sm">
+              <input
+                type="text"
+                value={search}
+                onChange={(event) =>
+                  setSearch(event.target.value)
+                }
+                placeholder="Search name, ID, user ID or phone..."
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+          </div>
 
-                  return (
-                    <div
+          {loading ? (
+            <div className="flex min-h-[300px] items-center justify-center">
+              <div className="text-center">
+                <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600" />
+
+                <p className="mt-4 text-sm font-medium text-slate-500">
+                  Loading parents...
+                </p>
+              </div>
+            </div>
+          ) : filteredParents.length === 0 ? (
+            <div className="p-12 text-center">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-2xl">
+                👨‍👩‍👧
+              </div>
+
+              <h3 className="mt-5 text-lg font-bold text-slate-950">
+                {search
+                  ? "No parents found"
+                  : "No parents yet"}
+              </h3>
+
+              <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
+                {search
+                  ? "Try a different search term."
+                  : "Create the first parent profile using the Add Parent button."}
+              </p>
+
+              {!search && (
+                <button
+                  type="button"
+                  onClick={openCreate}
+                  className="mt-5 rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700"
+                >
+                  + Add Parent
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[850px]">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                    <th className="px-5 py-4">
+                      Parent
+                    </th>
+                    <th className="px-5 py-4">
+                      Parent ID
+                    </th>
+                    <th className="px-5 py-4">
+                      User ID
+                    </th>
+                    <th className="px-5 py-4">
+                      Phone
+                    </th>
+                    <th className="px-5 py-4">
+                      Created
+                    </th>
+                    <th className="px-5 py-4 text-right">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {filteredParents.map((parent) => (
+                    <tr
                       key={parent.id}
-                      className={`group flex flex-col gap-4 p-5 transition sm:flex-row sm:items-center sm:justify-between ${
-                        selected ? "bg-blue-50/60" : "hover:bg-slate-50"
-                      }`}
+                      className="border-b border-slate-100 transition hover:bg-slate-50"
                     >
-                      <button
-                        onClick={() => openParentDetails(parent)}
-                        className="flex min-w-0 flex-1 items-center gap-4 text-left"
-                      >
-                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#102A56] text-sm font-bold text-white">
-                          {parent.first_name.charAt(0)}
-                          {parent.last_name.charAt(0)}
-                        </div>
-
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="truncate font-semibold text-[#102A56]">
-                              {parent.first_name} {parent.last_name}
-                            </h3>
-
-                            <span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-600">
-                              Active
-                            </span>
+                      <td className="px-5 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-sm font-bold text-blue-700">
+                            {getInitials(parent)}
                           </div>
 
-                          <p className="mt-1 text-xs text-slate-400">
-                            User ID: {parent.user_id}
-                            {parent.phone ? ` • ${parent.phone}` : ""}
-                          </p>
+                          <div>
+                            <p className="font-semibold text-slate-900">
+                              {parent.first_name}{" "}
+                              {parent.last_name}
+                            </p>
+
+                            <p className="mt-0.5 text-xs text-slate-500">
+                              Active parent
+                            </p>
+                          </div>
                         </div>
-                      </button>
+                      </td>
 
-                      <div className="flex shrink-0 items-center gap-2">
-                        <button
-                          onClick={() => openEditParent(parent)}
-                          className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
-                        >
-                          Edit
-                        </button>
+                      <td className="px-5 py-4 text-sm font-semibold text-slate-800">
+                        #{parent.id}
+                      </td>
 
-                        <button
-                          onClick={() => confirmDeactivate(parent)}
-                          className="rounded-lg border border-red-100 px-3 py-2 text-xs font-semibold text-red-500 transition hover:bg-red-50"
-                        >
-                          Deactivate
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
+                      <td className="px-5 py-4 text-sm text-slate-600">
+                        #{parent.user_id}
+                      </td>
 
-          {/* Parent details */}
-          <aside className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-            {!selectedParent ? (
-              <div className="flex min-h-[500px] flex-col items-center justify-center p-8 text-center">
-                <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-blue-50 text-3xl">
-                  👨‍👩‍👧
+                      <td className="px-5 py-4 text-sm text-slate-600">
+                        {parent.phone || "—"}
+                      </td>
+
+                      <td className="px-5 py-4 text-sm text-slate-600">
+                        {formatDate(parent.created_at)}
+                      </td>
+
+                      <td className="px-5 py-4">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openView(parent)
+                            }
+                            className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100"
+                          >
+                            View
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openEdit(parent)
+                            }
+                            className="rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        {/* MAIN SIDE PANEL */}
+        {(mode === "create" ||
+          mode === "edit" ||
+          selectedParent) && (
+          <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/40">
+            <div className="h-full w-full max-w-2xl overflow-y-auto bg-white shadow-2xl">
+              {/* PANEL HEADER */}
+              <div className="sticky top-0 z-20 border-b border-slate-200 bg-white px-6 py-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
+                      {mode === "create"
+                        ? "New Parent"
+                        : mode === "edit"
+                          ? "Edit Parent"
+                          : "Parent Details"}
+                    </p>
+
+                    <h2 className="mt-1 text-2xl font-bold text-slate-950">
+                      {mode === "create"
+                        ? "Add Parent"
+                        : selectedParent
+                          ? `${selectedParent.first_name} ${selectedParent.last_name}`
+                          : "Parent"}
+                    </h2>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={closePanel}
+                    className="rounded-xl bg-slate-100 px-3 py-2 text-lg font-bold text-slate-600 hover:bg-slate-200"
+                  >
+                    ×
+                  </button>
                 </div>
-
-                <h2 className="mt-5 font-bold text-[#102A56]">
-                  Select a parent
-                </h2>
-
-                <p className="mt-2 max-w-xs text-sm leading-6 text-slate-400">
-                  Choose a parent from the directory to view and manage their
-                  children.
-                </p>
               </div>
-            ) : (
-              <>
-                <div className="border-b border-slate-100 p-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#102A56] text-sm font-bold text-white">
-                        {selectedParent.first_name.charAt(0)}
-                        {selectedParent.last_name.charAt(0)}
+
+              {loadingDetails ? (
+                <div className="flex min-h-[300px] items-center justify-center">
+                  <div className="text-center">
+                    <div className="mx-auto h-9 w-9 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600" />
+
+                    <p className="mt-4 text-sm text-slate-500">
+                      Loading details...
+                    </p>
+                  </div>
+                </div>
+              ) : mode === "create" ? (
+                /* =================================================
+                   CREATE PARENT
+                   ================================================= */
+                <form
+                  onSubmit={handleCreate}
+                  className="space-y-5 p-6"
+                >
+                  <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+                    <p className="text-sm font-semibold text-blue-900">
+                      Parent User ID
+                    </p>
+
+                    <p className="mt-1 text-xs leading-5 text-blue-700">
+                      Enter an existing active user whose role is
+                      <strong> parent</strong>.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                      User ID *
+                    </label>
+
+                    <input
+                      type="number"
+                      min="1"
+                      value={form.user_id}
+                      onChange={(event) =>
+                        handleFormChange(
+                          "user_id",
+                          event.target.value,
+                        )
+                      }
+                      placeholder="e.g. 8"
+                      className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      required
+                    />
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">
+                        First Name *
+                      </label>
+
+                      <input
+                        type="text"
+                        value={form.first_name}
+                        onChange={(event) =>
+                          handleFormChange(
+                            "first_name",
+                            event.target.value,
+                          )
+                        }
+                        placeholder="First name"
+                        className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">
+                        Last Name *
+                      </label>
+
+                      <input
+                        type="text"
+                        value={form.last_name}
+                        onChange={(event) =>
+                          handleFormChange(
+                            "last_name",
+                            event.target.value,
+                          )
+                        }
+                        placeholder="Last name"
+                        className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                      Phone
+                    </label>
+
+                    <input
+                      type="tel"
+                      value={form.phone}
+                      onChange={(event) =>
+                        handleFormChange(
+                          "phone",
+                          event.target.value,
+                        )
+                      }
+                      placeholder="Phone number"
+                      className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </div>
+
+                  <div className="flex gap-3 border-t border-slate-200 pt-5">
+                    <button
+                      type="button"
+                      onClick={closePanel}
+                      className="flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+
+                    <button
+                      type="submit"
+                      disabled={saving}
+                      className="flex-1 rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {saving
+                        ? "Creating..."
+                        : "Create Parent"}
+                    </button>
+                  </div>
+                </form>
+              ) : mode === "edit" &&
+                selectedParent ? (
+                /* =================================================
+                   EDIT PARENT
+                   ================================================= */
+                <form
+                  onSubmit={handleUpdate}
+                  className="space-y-5 p-6"
+                >
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">
+                        Parent ID
+                      </label>
+
+                      <input
+                        type="text"
+                        value={selectedParent.id}
+                        disabled
+                        className="w-full rounded-xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm text-slate-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">
+                        User ID
+                      </label>
+
+                      <input
+                        type="text"
+                        value={selectedParent.user_id}
+                        disabled
+                        className="w-full rounded-xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm text-slate-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">
+                        First Name *
+                      </label>
+
+                      <input
+                        type="text"
+                        value={form.first_name}
+                        onChange={(event) =>
+                          handleFormChange(
+                            "first_name",
+                            event.target.value,
+                          )
+                        }
+                        className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">
+                        Last Name *
+                      </label>
+
+                      <input
+                        type="text"
+                        value={form.last_name}
+                        onChange={(event) =>
+                          handleFormChange(
+                            "last_name",
+                            event.target.value,
+                          )
+                        }
+                        className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                      Phone
+                    </label>
+
+                    <input
+                      type="tel"
+                      value={form.phone}
+                      onChange={(event) =>
+                        handleFormChange(
+                          "phone",
+                          event.target.value,
+                        )
+                      }
+                      className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Account Status
+                    </p>
+
+                    <p
+                      className={`mt-2 text-sm font-bold ${
+                        selectedParent.is_active
+                          ? "text-emerald-700"
+                          : "text-red-700"
+                      }`}
+                    >
+                      {selectedParent.is_active
+                        ? "Active"
+                        : "Inactive"}
+                    </p>
+                  </div>
+
+                  <div className="flex gap-3 border-t border-slate-200 pt-5">
+                    <button
+                      type="button"
+                      onClick={() => setMode("view")}
+                      className="flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+
+                    <button
+                      type="submit"
+                      disabled={saving}
+                      className="flex-1 rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {saving
+                        ? "Saving..."
+                        : "Save Changes"}
+                    </button>
+                  </div>
+                </form>
+              ) : selectedParent ? (
+                /* =================================================
+                   VIEW PARENT + CHILDREN
+                   ================================================= */
+                <div className="space-y-6 p-6">
+                  {/* PARENT CARD */}
+                  <div className="rounded-2xl bg-slate-950 p-5 text-white">
+                    <div className="flex items-center gap-4">
+                      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/10 text-lg font-bold">
+                        {getInitials(selectedParent)}
                       </div>
 
-                      <div className="min-w-0">
-                        <h2 className="truncate font-bold text-[#102A56]">
+                      <div>
+                        <p className="text-xs uppercase tracking-wide text-slate-400">
+                          Parent
+                        </p>
+
+                        <h3 className="mt-1 text-2xl font-bold">
                           {selectedParent.first_name}{" "}
                           {selectedParent.last_name}
-                        </h2>
-                        <p className="text-xs text-slate-400">
+                        </h3>
+
+                        <p className="mt-1 text-sm text-slate-400">
                           Parent #{selectedParent.id}
                         </p>
                       </div>
                     </div>
-
-                    <button
-                      onClick={openChildModal}
-                      className="shrink-0 rounded-xl bg-[#102A56] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#17396f]"
-                    >
-                      + Child
-                    </button>
                   </div>
 
-                  <div className="mt-4 grid grid-cols-2 gap-2">
-                    <div className="rounded-xl bg-slate-50 p-3">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  {/* PARENT INFO */}
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-xs font-medium text-slate-500">
+                        Parent ID
+                      </p>
+
+                      <p className="mt-1 font-bold text-slate-900">
+                        #{selectedParent.id}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-xs font-medium text-slate-500">
                         User ID
                       </p>
-                      <p className="mt-1 text-sm font-semibold text-slate-700">
-                        {selectedParent.user_id}
+
+                      <p className="mt-1 font-bold text-slate-900">
+                        #{selectedParent.user_id}
                       </p>
                     </div>
 
-                    <div className="rounded-xl bg-slate-50 p-3">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-xs font-medium text-slate-500">
                         Phone
                       </p>
-                      <p className="mt-1 truncate text-sm font-semibold text-slate-700">
-                        {selectedParent.phone || "Not provided"}
+
+                      <p className="mt-1 font-bold text-slate-900">
+                        {selectedParent.phone ||
+                          "Not provided"}
                       </p>
                     </div>
+
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-xs font-medium text-slate-500">
+                        Status
+                      </p>
+
+                      <p
+                        className={`mt-1 font-bold ${
+                          selectedParent.is_active
+                            ? "text-emerald-700"
+                            : "text-red-700"
+                        }`}
+                      >
+                        {selectedParent.is_active
+                          ? "Active"
+                          : "Inactive"}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* =================================================
+                     CHILDREN SECTION
+                     ================================================= */}
+                  <section className="rounded-2xl border border-slate-200 bg-white">
+                    <div className="flex flex-col gap-3 border-b border-slate-200 p-5 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <h3 className="font-bold text-slate-950">
+                          Children
+                        </h3>
+
+                        <p className="mt-1 text-xs text-slate-500">
+                          Students linked to this parent.
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={openLinkChild}
+                        className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700"
+                      >
+                        + Link Student
+                      </button>
+                    </div>
+
+                    {loadingChildren ? (
+                      <div className="p-8 text-center">
+                        <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-emerald-600" />
+
+                        <p className="mt-3 text-sm text-slate-500">
+                          Loading children...
+                        </p>
+                      </div>
+                    ) : children.length === 0 ? (
+                      <div className="p-8 text-center">
+                        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50 text-2xl">
+                          👨‍👩‍👧
+                        </div>
+
+                        <h4 className="mt-4 font-bold text-slate-900">
+                          No children linked
+                        </h4>
+
+                        <p className="mt-1 text-sm text-slate-500">
+                          Link a student to this parent.
+                        </p>
+
+                        <button
+                          type="button"
+                          onClick={openLinkChild}
+                          className="mt-4 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700"
+                        >
+                          + Link Student
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-slate-100">
+                        {children.map((relationship) => {
+                          const student =
+                            relationship.student;
+
+                          const studentName = student
+                            ? `${student.first_name} ${student.last_name}`
+                            : `Student #${relationship.student_id}`;
+
+                          return (
+                            <div
+                              key={`${relationship.parent_id}-${relationship.student_id}`}
+                              className="p-5"
+                            >
+                              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                                <div className="flex items-start gap-3">
+                                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-sm font-bold text-blue-700">
+                                    {student
+                                      ? `${student.first_name?.[0] || ""}${student.last_name?.[0] || ""}`.toUpperCase()
+                                      : "ST"}
+                                  </div>
+
+                                  <div>
+                                    <p className="font-bold text-slate-900">
+                                      {studentName}
+                                    </p>
+
+                                    {student && (
+                                      <>
+                                        <p className="mt-0.5 text-xs text-slate-500">
+                                          Admission:{" "}
+                                          {
+                                            student.admission_number
+                                          }
+                                        </p>
+
+                                        <p className="mt-0.5 text-xs text-slate-500">
+                                          Class ID:{" "}
+                                          {student.class_id ??
+                                            "Not assigned"}
+                                        </p>
+                                      </>
+                                    )}
+
+                                    <div className="mt-2 flex flex-wrap gap-2">
+                                      <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-blue-700">
+                                        {
+                                          relationship.relation_type
+                                        }
+                                      </span>
+
+                                      {relationship.is_primary && (
+                                        <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700">
+                                          Primary
+                                        </span>
+                                      )}
+
+                                      {relationship.is_emergency_contact && (
+                                        <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-700">
+                                          Emergency
+                                        </span>
+                                      )}
+
+                                      {relationship.receives_notifications && (
+                                        <span className="rounded-full bg-purple-50 px-2.5 py-1 text-[11px] font-bold text-purple-700">
+                                          Notifications
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      openEditChild(
+                                        relationship,
+                                      )
+                                    }
+                                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100"
+                                  >
+                                    Edit
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleUnlinkChild(
+                                        relationship,
+                                      )
+                                    }
+                                    disabled={
+                                      unlinkingStudentId ===
+                                      relationship.student_id
+                                    }
+                                    className="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-60"
+                                  >
+                                    {unlinkingStudentId ===
+                                    relationship.student_id
+                                      ? "Unlinking..."
+                                      : "Unlink"}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </section>
+
+                  {/* PARENT ACTIONS */}
+                  <div className="flex flex-col gap-3 border-t border-slate-200 pt-5 sm:flex-row">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openEdit(selectedParent)
+                      }
+                      className="flex-1 rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700"
+                    >
+                      Edit Parent
+                    </button>
+
+                    {selectedParent.is_active ? (
+                      <button
+                        type="button"
+                        onClick={handleDelete}
+                        disabled={deleting}
+                        className="flex-1 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700 hover:bg-red-100 disabled:opacity-60"
+                      >
+                        {deleting
+                          ? "Deactivating..."
+                          : "Deactivate"}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleReactivate}
+                        disabled={saving}
+                        className="flex-1 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
+                      >
+                        {saving
+                          ? "Reactivating..."
+                          : "Reactivate"}
+                      </button>
+                    )}
                   </div>
                 </div>
+              ) : null}
+            </div>
+          </div>
+        )}
 
-                <div className="p-5">
-                  <div className="mb-4 flex items-center justify-between">
-                    <div>
-                      <h3 className="font-bold text-[#102A56]">
-                        Children & Relationships
-                      </h3>
-                      <p className="mt-1 text-xs text-slate-400">
-                        Family links and communication settings.
-                      </p>
-                    </div>
+        {/* ==========================================================
+           CHILD MODAL
+           ========================================================== */}
+        {childMode !== "none" && selectedParent && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4">
+            <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-2xl">
+              <div className="border-b border-slate-200 px-6 py-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-600">
+                      Parent → Student
+                    </p>
 
-                    <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-600">
-                      {children.length}
-                    </span>
+                    <h3 className="mt-1 text-xl font-bold text-slate-950">
+                      {childMode === "create"
+                        ? "Link Student"
+                        : "Edit Relationship"}
+                    </h3>
+
+                    <p className="mt-1 text-xs text-slate-500">
+                      {selectedParent.first_name}{" "}
+                      {selectedParent.last_name}
+                    </p>
                   </div>
 
-                  {childrenLoading ? (
-                    <div className="rounded-xl bg-slate-50 p-8 text-center text-sm text-slate-400">
-                      Loading children...
-                    </div>
-                  ) : children.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center">
-                      <p className="font-semibold text-slate-600">
-                        No children linked
+                  <button
+                    type="button"
+                    onClick={closeChildForm}
+                    className="rounded-xl bg-slate-100 px-3 py-2 text-lg font-bold text-slate-600 hover:bg-slate-200"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+
+              <form
+                onSubmit={
+                  childMode === "create"
+                    ? handleLinkChild
+                    : handleUpdateChild
+                }
+                className="space-y-5 p-6"
+              >
+                {/* STUDENT */}
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
+                    Student *
+                  </label>
+
+                  {childMode === "edit" &&
+                  selectedChild ? (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="font-bold text-slate-900">
+                        {selectedChild.student
+                          ? `${selectedChild.student.first_name} ${selectedChild.student.last_name}`
+                          : `Student #${selectedChild.student_id}`}
                       </p>
-                      <p className="mt-1 text-xs text-slate-400">
-                        Use &quot;+ Child&quot; to create a family
+
+                      {selectedChild.student && (
+                        <p className="mt-1 text-xs text-slate-500">
+                          {
+                            selectedChild.student
+                              .admission_number
+                          }
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <input
+                        type="text"
+                        value={studentSearch}
+                        onChange={(event) =>
+                          setStudentSearch(
+                            event.target.value,
+                          )
+                        }
+                        placeholder="Search student name, admission number..."
+                        className="mb-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-100"
+                      />
+
+                      {loadingStudents ? (
+                        <div className="rounded-xl border border-slate-200 p-5 text-center">
+                          <div className="mx-auto h-7 w-7 animate-spin rounded-full border-4 border-slate-200 border-t-emerald-600" />
+
+                          <p className="mt-2 text-xs text-slate-500">
+                            Loading students...
+                          </p>
+                        </div>
+                      ) : availableStudents.length === 0 ? (
+                        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                          No available students found.
+                        </div>
+                      ) : (
+                        <div className="max-h-56 overflow-y-auto rounded-xl border border-slate-200">
+                          {availableStudents.map(
+                            (student) => {
+                              const selected =
+                                Number(
+                                  childForm.student_id,
+                                ) === student.id;
+
+                              return (
+                                <button
+                                  key={student.id}
+                                  type="button"
+                                  onClick={() =>
+                                    handleChildFormChange(
+                                      "student_id",
+                                      String(
+                                        student.id,
+                                      ),
+                                    )
+                                  }
+                                  className={`w-full border-b border-slate-100 p-3 text-left last:border-b-0 ${
+                                    selected
+                                      ? "bg-emerald-50"
+                                      : "hover:bg-slate-50"
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between gap-3">
+                                    <div>
+                                      <p className="text-sm font-bold text-slate-900">
+                                        {
+                                          student.first_name
+                                        }{" "}
+                                        {
+                                          student.last_name
+                                        }
+                                      </p>
+
+                                      <p className="mt-0.5 text-xs text-slate-500">
+                                        {
+                                          student.admission_number
+                                        }{" "}
+                                        · Class ID:{" "}
+                                        {student.class_id ??
+                                          "—"}
+                                      </p>
+                                    </div>
+
+                                    {selected && (
+                                      <span className="text-sm font-bold text-emerald-600">
+                                        ✓
+                                      </span>
+                                    )}
+                                  </div>
+                                </button>
+                              );
+                            },
+                          )}
+                        </div>
+                      )}
+
+                      {childForm.student_id && (
+                        <p className="mt-2 text-xs font-semibold text-emerald-700">
+                          Selected Student ID:{" "}
+                          {childForm.student_id}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                {/* RELATION */}
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
+                    Relation *
+                  </label>
+
+                  <select
+                    value={childForm.relation_type}
+                    onChange={(event) =>
+                      handleChildFormChange(
+                        "relation_type",
+                        event.target.value,
+                      )
+                    }
+                    className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                  >
+                    {RELATIONS.map((relation) => (
+                      <option
+                        key={relation}
+                        value={relation}
+                      >
+                        {relation}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* OPTIONS */}
+                <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <label className="flex cursor-pointer items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">
+                        Primary Parent
+                      </p>
+
+                      <p className="text-xs text-slate-500">
+                        Make this parent the primary contact
+                        for the student.
+                      </p>
+                    </div>
+
+                    <input
+                      type="checkbox"
+                      checked={childForm.is_primary}
+                      onChange={(event) =>
+                        handleChildFormChange(
+                          "is_primary",
+                          event.target.checked,
+                        )
+                      }
+                      className="h-5 w-5 rounded border-slate-300"
+                    />
+                  </label>
+
+                  <label className="flex cursor-pointer items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">
+                        Emergency Contact
+                      </p>
+
+                      <p className="text-xs text-slate-500">
+                        Mark this parent as an emergency contact.
+                      </p>
+                    </div>
+
+                    <input
+                      type="checkbox"
+                      checked={
+                        childForm.is_emergency_contact
+                      }
+                      onChange={(event) =>
+                        handleChildFormChange(
+                          "is_emergency_contact",
+                          event.target.checked,
+                        )
+                      }
+                      className="h-5 w-5 rounded border-slate-300"
+                    />
+                  </label>
+
+                  <label className="flex cursor-pointer items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">
+                        Notifications
+                      </p>
+
+                      <p className="text-xs text-slate-500">
+                        Allow notifications for this parent-child
                         relationship.
                       </p>
                     </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {children.map((relationship) => (
-                        <div
-                          key={`${relationship.parent_id}-${relationship.student_id}`}
-                          className="rounded-2xl border border-slate-200 p-4"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex min-w-0 gap-3">
-                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-sm font-bold text-blue-700">
-                                {relationship.student?.first_name?.charAt(0) ||
-                                  "S"}
-                              </div>
 
-                              <div className="min-w-0">
-                                <p className="truncate font-semibold text-slate-700">
-                                  {relationship.student
-                                    ? `${relationship.student.first_name} ${relationship.student.last_name}`
-                                    : `Student #${relationship.student_id}`}
-                                </p>
-
-                                <p className="mt-1 text-xs text-slate-400">
-                                  {relationship.student?.admission_number ||
-                                    `ID ${relationship.student_id}`}
-                                </p>
-                              </div>
-                            </div>
-
-                            <button
-                              onClick={() => confirmUnlink(relationship)}
-                              className="text-xs font-semibold text-red-500 hover:text-red-700"
-                            >
-                              Unlink
-                            </button>
-                          </div>
-
-                          <div className="mt-3 flex flex-wrap gap-1.5">
-                            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-600">
-                              {relationship.relation_type}
-                            </span>
-
-                            {relationship.is_primary && (
-                              <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-blue-600">
-                                Primary
-                              </span>
-                            )}
-
-                            {relationship.is_emergency_contact && (
-                              <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-bold text-amber-700">
-                                Emergency
-                              </span>
-                            )}
-
-                            {relationship.receives_notifications && (
-                              <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-bold text-emerald-600">
-                                Notifications
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
-                            <select
-                              value={relationship.relation_type}
-                              onChange={(event) =>
-                                updateRelationship(relationship, {
-                                  relation_type: event.target.value,
-                                })
-                              }
-                              className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs outline-none focus:border-blue-400"
-                            >
-                              {relationOptions.map((relation) => (
-                                <option key={relation} value={relation}>
-                                  {relation}
-                                </option>
-                              ))}
-                            </select>
-
-                            <button
-                              onClick={() =>
-                                updateRelationship(relationship, {
-                                  is_primary: !relationship.is_primary,
-                                })
-                              }
-                              className={`rounded-lg px-2.5 py-2 text-xs font-semibold transition ${
-                                relationship.is_primary
-                                  ? "bg-blue-50 text-blue-700"
-                                  : "bg-slate-50 text-slate-500 hover:bg-blue-50 hover:text-blue-700"
-                              }`}
-                            >
-                              {relationship.is_primary
-                                ? "✓ Primary"
-                                : "Set Primary"}
-                            </button>
-
-                            <button
-                              onClick={() =>
-                                updateRelationship(relationship, {
-                                  receives_notifications:
-                                    !relationship.receives_notifications,
-                                })
-                              }
-                              className={`rounded-lg px-2.5 py-2 text-xs font-semibold transition ${
-                                relationship.receives_notifications
-                                  ? "bg-emerald-50 text-emerald-700"
-                                  : "bg-slate-50 text-slate-500 hover:bg-emerald-50 hover:text-emerald-700"
-                              }`}
-                            >
-                              {relationship.receives_notifications
-                                ? "✓ Notify"
-                                : "No Notify"}
-                            </button>
-                          </div>
-
-                          <button
-                            onClick={() =>
-                              updateRelationship(relationship, {
-                                is_emergency_contact:
-                                  !relationship.is_emergency_contact,
-                              })
-                            }
-                            className={`mt-2 w-full rounded-lg px-3 py-2 text-xs font-semibold transition ${
-                              relationship.is_emergency_contact
-                                ? "bg-amber-50 text-amber-700"
-                                : "bg-slate-50 text-slate-500 hover:bg-amber-50 hover:text-amber-700"
-                            }`}
-                          >
-                            {relationship.is_emergency_contact
-                              ? "✓ Emergency Contact"
-                              : "Set as Emergency Contact"}
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-          </aside>
-        </div>
-      </div>
-
-      {/* Parent Modal */}
-      {showParentModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm">
-          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-2xl">
-            <div className="border-b border-slate-100 p-5">
-              <h2 className="text-lg font-bold text-[#102A56]">
-                {editingParent ? "Edit Parent" : "Add Parent"}
-              </h2>
-              <p className="mt-1 text-xs text-slate-400">
-                {editingParent
-                  ? "Update the parent profile."
-                  : "Create a parent profile using an existing parent user account."}
-              </p>
-            </div>
-
-            <form onSubmit={handleParentSubmit} className="space-y-4 p-5">
-              {!editingParent && (
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-slate-600">
-                    User ID *
-                  </label>
-                  <input
-                    type="number"
-                    value={parentForm.user_id}
-                    onChange={(event) =>
-                      setParentForm({
-                        ...parentForm,
-                        user_id: event.target.value,
-                      })
-                    }
-                    placeholder="Existing parent user ID"
-                    className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-400"
-                    required
-                  />
-                  <p className="mt-1 text-[11px] text-slate-400">
-                    This must belong to an active user whose role is
-                    <strong> parent</strong>.
-                  </p>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-slate-600">
-                    First Name *
-                  </label>
-                  <input
-                    value={parentForm.first_name}
-                    onChange={(event) =>
-                      setParentForm({
-                        ...parentForm,
-                        first_name: event.target.value,
-                      })
-                    }
-                    placeholder="First name"
-                    className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-400"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-slate-600">
-                    Last Name *
-                  </label>
-                  <input
-                    value={parentForm.last_name}
-                    onChange={(event) =>
-                      setParentForm({
-                        ...parentForm,
-                        last_name: event.target.value,
-                      })
-                    }
-                    placeholder="Last name"
-                    className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-400"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold text-slate-600">
-                  Phone
-                </label>
-                <input
-                  value={parentForm.phone}
-                  onChange={(event) =>
-                    setParentForm({
-                      ...parentForm,
-                      phone: event.target.value,
-                    })
-                  }
-                  placeholder="Phone number"
-                  className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-400"
-                />
-              </div>
-
-              {editingParent && (
-                <label className="flex cursor-pointer items-center gap-3 rounded-xl bg-slate-50 p-3">
-                  <input
-                    type="checkbox"
-                    checked={parentForm.is_active}
-                    onChange={(event) =>
-                      setParentForm({
-                        ...parentForm,
-                        is_active: event.target.checked,
-                      })
-                    }
-                    className="h-4 w-4"
-                  />
-                  <span className="text-sm font-medium text-slate-700">
-                    Parent account is active
-                  </span>
-                </label>
-              )}
-
-              <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
-                <button
-                  type="button"
-                  onClick={() => setShowParentModal(false)}
-                  className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="rounded-xl bg-[#102A56] px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {saving
-                    ? "Saving..."
-                    : editingParent
-                      ? "Save Changes"
-                      : "Create Parent"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Child Modal */}
-      {showChildModal && selectedParent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm">
-          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-2xl">
-            <div className="border-b border-slate-100 p-5">
-              <h2 className="text-lg font-bold text-[#102A56]">
-                Link Child
-              </h2>
-              <p className="mt-1 text-xs text-slate-400">
-                Link a student to {selectedParent.first_name}{" "}
-                {selectedParent.last_name}.
-              </p>
-            </div>
-
-            <form onSubmit={handleChildSubmit} className="space-y-4 p-5">
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold text-slate-600">
-                  Student *
-                </label>
-
-                <select
-                  value={childForm.student_id}
-                  onChange={(event) =>
-                    setChildForm({
-                      ...childForm,
-                      student_id: event.target.value,
-                    })
-                  }
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-blue-400"
-                  required
-                >
-                  <option value="">Select student</option>
-
-                  {students
-                    .filter(
-                      (student) =>
-                        !children.some(
-                          (child) => child.student_id === student.id
+                    <input
+                      type="checkbox"
+                      checked={
+                        childForm.receives_notifications
+                      }
+                      onChange={(event) =>
+                        handleChildFormChange(
+                          "receives_notifications",
+                          event.target.checked,
                         )
-                    )
-                    .map((student) => (
-                      <option key={student.id} value={student.id}>
-                        {student.first_name} {student.last_name} —{" "}
-                        {student.admission_number}
-                      </option>
-                    ))}
-                </select>
-              </div>
+                      }
+                      className="h-5 w-5 rounded border-slate-300"
+                    />
+                  </label>
+                </div>
 
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold text-slate-600">
-                  Relationship *
-                </label>
+                {/* ACTIONS */}
+                <div className="flex gap-3 border-t border-slate-200 pt-5">
+                  <button
+                    type="button"
+                    onClick={closeChildForm}
+                    className="flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
 
-                <select
-                  value={childForm.relation_type}
-                  onChange={(event) =>
-                    setChildForm({
-                      ...childForm,
-                      relation_type: event.target.value,
-                    })
-                  }
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-blue-400"
-                >
-                  {relationOptions.map((relation) => (
-                    <option key={relation} value={relation}>
-                      {relation}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <label className="flex cursor-pointer items-center gap-3 rounded-xl bg-slate-50 p-3">
-                  <input
-                    type="checkbox"
-                    checked={childForm.is_primary}
-                    onChange={(event) =>
-                      setChildForm({
-                        ...childForm,
-                        is_primary: event.target.checked,
-                      })
+                  <button
+                    type="submit"
+                    disabled={
+                      savingChild ||
+                      (childMode === "create" &&
+                        !childForm.student_id)
                     }
-                    className="h-4 w-4"
-                  />
-                  <span className="text-sm font-medium text-slate-700">
-                    Primary parent
-                  </span>
-                </label>
-
-                <label className="flex cursor-pointer items-center gap-3 rounded-xl bg-slate-50 p-3">
-                  <input
-                    type="checkbox"
-                    checked={childForm.is_emergency_contact}
-                    onChange={(event) =>
-                      setChildForm({
-                        ...childForm,
-                        is_emergency_contact: event.target.checked,
-                      })
-                    }
-                    className="h-4 w-4"
-                  />
-                  <span className="text-sm font-medium text-slate-700">
-                    Emergency contact
-                  </span>
-                </label>
-
-                <label className="flex cursor-pointer items-center gap-3 rounded-xl bg-slate-50 p-3">
-                  <input
-                    type="checkbox"
-                    checked={childForm.receives_notifications}
-                    onChange={(event) =>
-                      setChildForm({
-                        ...childForm,
-                        receives_notifications: event.target.checked,
-                      })
-                    }
-                    className="h-4 w-4"
-                  />
-                  <span className="text-sm font-medium text-slate-700">
-                    Receives school notifications
-                  </span>
-                </label>
-              </div>
-
-              <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
-                <button
-                  type="button"
-                  onClick={() => setShowChildModal(false)}
-                  className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="rounded-xl bg-[#102A56] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
-                >
-                  {saving ? "Linking..." : "Link Child"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Deactivate Modal */}
-      {showDeleteModal && editingParent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 text-xl">
-              !
-            </div>
-
-            <h2 className="mt-4 text-lg font-bold text-[#102A56]">
-              Deactivate parent?
-            </h2>
-
-            <p className="mt-2 text-sm leading-6 text-slate-500">
-              This will deactivate{" "}
-              <strong>
-                {editingParent.first_name} {editingParent.last_name}
-              </strong>
-              . Existing family relationships are preserved.
-            </p>
-
-            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <button
-                onClick={() => setShowDeleteModal(false)}
-                className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600"
-              >
-                Cancel
-              </button>
-
-              <button
-                onClick={handleDeactivate}
-                disabled={saving}
-                className="rounded-xl bg-red-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
-              >
-                {saving ? "Deactivating..." : "Deactivate"}
-              </button>
+                    className="flex-1 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {savingChild
+                      ? childMode === "create"
+                        ? "Linking..."
+                        : "Saving..."
+                      : childMode === "create"
+                        ? "Link Student"
+                        : "Save Relationship"}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Unlink Modal */}
-      {showUnlinkModal && relationshipToRemove && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-xl">
-              !
-            </div>
-
-            <h2 className="mt-4 text-lg font-bold text-[#102A56]">
-              Remove family relationship?
-            </h2>
-
-            <p className="mt-2 text-sm leading-6 text-slate-500">
-              The student will be unlinked from this parent. This does not
-              delete the parent or student.
-            </p>
-
-            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <button
-                onClick={() => setShowUnlinkModal(false)}
-                className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600"
-              >
-                Cancel
-              </button>
-
-              <button
-                onClick={handleUnlink}
-                disabled={saving}
-                className="rounded-xl bg-red-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
-              >
-                {saving ? "Removing..." : "Remove Relationship"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </main>
   );
 }

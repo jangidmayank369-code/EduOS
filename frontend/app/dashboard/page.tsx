@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Sidebar from "./components/Sidebar";
 
 type DashboardData = {
   // Admin
@@ -97,393 +96,364 @@ export default function DashboardPage() {
   };
 
   return (
-    /*
-      IMPORTANT:
-      h-screen + overflow-hidden keeps the application inside viewport.
-      Sidebar and main content don't push the page downward.
-    */
-    <div className="flex h-screen overflow-hidden bg-[#f5f7fb] text-slate-900">
-      {/* SIDEBAR */}
-      <div className="h-screen shrink-0">
-        <Sidebar />
-      </div>
+    <>
+      {/* TOP HEADER */}
+      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
+        <div className="flex min-h-[76px] items-center justify-between px-6 py-4 lg:px-8">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#315b9b]">
+              EduOS Intelligence Platform
+            </p>
 
-      {/* MAIN DASHBOARD */}
-      <main className="min-w-0 flex-1 overflow-y-auto">
-        {/* TOP HEADER */}
-        <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
-          <div className="flex min-h-[76px] items-center justify-between px-6 py-4 lg:px-8">
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#315b9b]">
-                EduOS Intelligence Platform
-              </p>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight text-[#102a56]">
+              Dashboard
+            </h1>
 
-              <h1 className="mt-1 text-2xl font-bold tracking-tight text-[#102a56]">
-                Dashboard
-              </h1>
+            <p className="mt-0.5 text-xs text-slate-500">
+              School overview and management
+            </p>
+          </div>
 
-              <p className="mt-0.5 text-xs text-slate-500">
-                School overview and management
-              </p>
+          <div className="flex items-center gap-3">
+            <div className="hidden items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 md:flex">
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              System Operational
             </div>
 
-            <div className="flex items-center gap-3">
-              <div className="hidden items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 md:flex">
-                <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                System Operational
-              </div>
-
-              <div className="rounded-xl bg-[#102a56] px-4 py-2 text-sm font-semibold text-white shadow-sm">
-                {roleName}
-              </div>
+            <div className="rounded-xl bg-[#102a56] px-4 py-2 text-sm font-semibold text-white shadow-sm">
+              {roleName}
             </div>
           </div>
-        </header>
+        </div>
+      </header>
 
-        {/* CONTENT */}
-        <div className="w-full px-6 py-7 lg:px-8">
-          {/* WELCOME BANNER */}
-          <section className="relative overflow-hidden rounded-3xl bg-[#102a56] p-7 shadow-[0_10px_35px_rgba(16,42,86,0.12)]">
-            {/* Decorative shapes */}
-            <div className="absolute -right-20 -top-24 h-64 w-64 rounded-full border-[32px] border-blue-300/10" />
+      {/* CONTENT */}
+      <div className="w-full px-6 py-7 lg:px-8">
+        {/* WELCOME BANNER */}
+        <section className="relative overflow-hidden rounded-3xl bg-[#102a56] p-7 shadow-[0_10px_35px_rgba(16,42,86,0.12)]">
+          <div className="absolute -right-20 -top-24 h-64 w-64 rounded-full border-[32px] border-blue-300/10" />
 
-            <div className="absolute -bottom-28 right-40 h-56 w-56 rounded-full border-[24px] border-cyan-300/10" />
+          <div className="absolute -bottom-28 right-40 h-56 w-56 rounded-full border-[24px] border-cyan-300/10" />
 
-            <div className="absolute right-10 top-10 h-4 w-4 rounded-full bg-cyan-300/70" />
+          <div className="absolute right-10 top-10 h-4 w-4 rounded-full bg-cyan-300/70" />
 
-            <div className="relative z-10 max-w-3xl">
-              <div className="mb-4 inline-flex items-center rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-medium text-blue-100">
-                <span className="mr-2 h-1.5 w-1.5 rounded-full bg-cyan-300" />
-                Real-time school overview
+          <div className="relative z-10 max-w-3xl">
+            <div className="mb-4 inline-flex items-center rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-medium text-blue-100">
+              <span className="mr-2 h-1.5 w-1.5 rounded-full bg-cyan-300" />
+              Real-time school overview
+            </div>
+
+            <h2 className="text-3xl font-bold tracking-tight text-white">
+              Welcome to EduOS 👋
+            </h2>
+
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-blue-100">
+              Your centralized school management workspace. Monitor
+              students, teachers, classes, academics and operations from
+              one intelligent platform.
+            </p>
+          </div>
+        </section>
+
+        {/* ERROR */}
+        {error && (
+          <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-medium text-red-700">
+            {error}
+          </div>
+        )}
+
+        {/* ================= ADMIN ================= */}
+        {userRole === "admin" && (
+          <>
+            <section className="mt-7 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+              <StatCard
+                title="Total Students"
+                value={
+                  loading ? "..." : String(dashboard?.total_students ?? 0)
+                }
+                description="Students enrolled"
+                icon="👨‍🎓"
+              />
+
+              <StatCard
+                title="Total Teachers"
+                value={
+                  loading ? "..." : String(dashboard?.total_teachers ?? 0)
+                }
+                description="Teaching staff"
+                icon="👨‍🏫"
+              />
+
+              <StatCard
+                title="Total Classes"
+                value={
+                  loading ? "..." : String(dashboard?.total_classes ?? 0)
+                }
+                description="Active classes"
+                icon="🏫"
+              />
+
+              <StatCard
+                title="Total Subjects"
+                value={
+                  loading ? "..." : String(dashboard?.total_subjects ?? 0)
+                }
+                description="Subjects offered"
+                icon="📚"
+              />
+
+              <StatCard
+                title="Pending Fees"
+                value={
+                  loading
+                    ? "..."
+                    : formatCurrency(
+                        dashboard?.total_pending_fee_amount ?? 0
+                      )
+                }
+                description="Outstanding amount"
+                icon="₹"
+                highlight
+              />
+
+              <StatCard
+                title="Active Assignments"
+                value={
+                  loading
+                    ? "..."
+                    : String(dashboard?.active_assignments ?? 0)
+                }
+                description="Currently active"
+                icon="📝"
+              />
+            </section>
+
+            <QuickActions />
+            <AISection />
+          </>
+        )}
+
+        {/* ================= TEACHER ================= */}
+        {userRole === "teacher" && (
+          <>
+            <section className="mt-7 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+              <StatCard
+                title="Assigned Classes"
+                value={
+                  loading
+                    ? "..."
+                    : String(dashboard?.assigned_classes ?? 0)
+                }
+                description="Classes assigned to you"
+                icon="🏫"
+              />
+
+              <StatCard
+                title="Assigned Subjects"
+                value={
+                  loading
+                    ? "..."
+                    : String(dashboard?.assigned_subjects ?? 0)
+                }
+                description="Subjects you teach"
+                icon="📚"
+              />
+
+              <StatCard
+                title="Total Students"
+                value={
+                  loading
+                    ? "..."
+                    : String(dashboard?.total_students ?? 0)
+                }
+                description="Students under your classes"
+                icon="👨‍🎓"
+              />
+
+              <StatCard
+                title="Active Assignments"
+                value={
+                  loading
+                    ? "..."
+                    : String(dashboard?.active_assignments ?? 0)
+                }
+                description="Currently active"
+                icon="📝"
+              />
+
+              <StatCard
+                title="Pending Submissions"
+                value={
+                  loading
+                    ? "..."
+                    : String(dashboard?.pending_submissions ?? 0)
+                }
+                description="Need your review"
+                icon="📋"
+              />
+            </section>
+
+            <QuickActions />
+            <AISection />
+          </>
+        )}
+
+        {/* ================= STUDENT ================= */}
+        {userRole === "student" && (
+          <>
+            <section className="mt-7 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+              <StatCard
+                title="Attendance"
+                value={
+                  loading
+                    ? "..."
+                    : `${dashboard?.attendance_percentage ?? 0}%`
+                }
+                description="Overall attendance"
+                icon="📅"
+              />
+
+              <StatCard
+                title="Marks Entries"
+                value={
+                  loading
+                    ? "..."
+                    : String(dashboard?.total_marks_entries ?? 0)
+                }
+                description="Academic marks recorded"
+                icon="📊"
+              />
+
+              <StatCard
+                title="Pending Assignments"
+                value={
+                  loading
+                    ? "..."
+                    : String(dashboard?.pending_assignments ?? 0)
+                }
+                description="Assignments remaining"
+                icon="📝"
+              />
+
+              <StatCard
+                title="Notifications"
+                value={
+                  loading
+                    ? "..."
+                    : String(dashboard?.unread_notifications ?? 0)
+                }
+                description="Unread notifications"
+                icon="🔔"
+              />
+            </section>
+
+            <QuickActions />
+            <AISection />
+          </>
+        )}
+
+        {/* ================= PARENT ================= */}
+        {userRole === "parent" && (
+          <>
+            <section className="mt-7 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+              <StatCard
+                title="Children"
+                value={
+                  loading
+                    ? "..."
+                    : String(dashboard?.children_count ?? 0)
+                }
+                description="Children linked to account"
+                icon="👨‍👩‍👧"
+              />
+
+              <StatCard
+                title="Notifications"
+                value={
+                  loading
+                    ? "..."
+                    : String(dashboard?.unread_notifications ?? 0)
+                }
+                description="Unread notifications"
+                icon="🔔"
+              />
+
+              <StatCard
+                title="Student Profiles"
+                value={
+                  loading
+                    ? "..."
+                    : String(dashboard?.children?.length ?? 0)
+                }
+                description="Available child profiles"
+                icon="🎓"
+              />
+            </section>
+
+            {/* CHILDREN */}
+            <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="mb-5">
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#315b9b]">
+                  Family Overview
+                </p>
+
+                <h3 className="mt-1 text-xl font-bold text-[#102a56]">
+                  Your Children
+                </h3>
               </div>
 
-              <h2 className="text-3xl font-bold tracking-tight text-white">
-                Welcome to EduOS 👋
-              </h2>
+              {dashboard?.children && dashboard.children.length > 0 ? (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {dashboard.children.map(
+                    (child: any, index: number) => (
+                      <div
+                        key={child.student_id ?? index}
+                        className="rounded-2xl border border-slate-200 bg-slate-50 p-5"
+                      >
+                        <h4 className="font-bold text-[#102a56]">
+                          {child.name || "Student"}
+                        </h4>
 
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-blue-100">
-                Your centralized school management workspace. Monitor
-                students, teachers, classes, academics and operations from
-                one intelligent platform.
-              </p>
-            </div>
-          </section>
+                        <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                          <div>
+                            <p className="text-xs text-slate-400">
+                              Attendance
+                            </p>
 
-          {/* ERROR */}
-          {error && (
-            <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-medium text-red-700">
-              {error}
-            </div>
-          )}
+                            <p className="mt-1 font-semibold text-slate-700">
+                              {child.attendance_percentage ?? 0}%
+                            </p>
+                          </div>
 
-          {/* ================= ADMIN ================= */}
-          {userRole === "admin" && (
-            <>
-              {/* STATS */}
-              <section className="mt-7 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
-                <StatCard
-                  title="Total Students"
-                  value={
-                    loading
-                      ? "..."
-                      : String(dashboard?.total_students ?? 0)
-                  }
-                  description="Students enrolled"
-                  icon="👨‍🎓"
-                />
+                          <div>
+                            <p className="text-xs text-slate-400">
+                              Pending Assignments
+                            </p>
 
-                <StatCard
-                  title="Total Teachers"
-                  value={
-                    loading
-                      ? "..."
-                      : String(dashboard?.total_teachers ?? 0)
-                  }
-                  description="Teaching staff"
-                  icon="👨‍🏫"
-                />
-
-                <StatCard
-                  title="Total Classes"
-                  value={
-                    loading
-                      ? "..."
-                      : String(dashboard?.total_classes ?? 0)
-                  }
-                  description="Active classes"
-                  icon="🏫"
-                />
-
-                <StatCard
-                  title="Total Subjects"
-                  value={
-                    loading
-                      ? "..."
-                      : String(dashboard?.total_subjects ?? 0)
-                  }
-                  description="Subjects offered"
-                  icon="📚"
-                />
-
-                <StatCard
-                  title="Pending Fees"
-                  value={
-                    loading
-                      ? "..."
-                      : formatCurrency(
-                          dashboard?.total_pending_fee_amount ?? 0
-                        )
-                  }
-                  description="Outstanding amount"
-                  icon="₹"
-                  highlight
-                />
-
-                <StatCard
-                  title="Active Assignments"
-                  value={
-                    loading
-                      ? "..."
-                      : String(dashboard?.active_assignments ?? 0)
-                  }
-                  description="Currently active"
-                  icon="📝"
-                />
-              </section>
-
-              {/* QUICK ACTIONS */}
-              <QuickActions />
-
-              {/* AI */}
-              <AISection />
-            </>
-          )}
-
-          {/* ================= TEACHER ================= */}
-          {userRole === "teacher" && (
-            <>
-              <section className="mt-7 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
-                <StatCard
-                  title="Assigned Classes"
-                  value={
-                    loading
-                      ? "..."
-                      : String(dashboard?.assigned_classes ?? 0)
-                  }
-                  description="Classes assigned to you"
-                  icon="🏫"
-                />
-
-                <StatCard
-                  title="Assigned Subjects"
-                  value={
-                    loading
-                      ? "..."
-                      : String(dashboard?.assigned_subjects ?? 0)
-                  }
-                  description="Subjects you teach"
-                  icon="📚"
-                />
-
-                <StatCard
-                  title="Total Students"
-                  value={
-                    loading
-                      ? "..."
-                      : String(dashboard?.total_students ?? 0)
-                  }
-                  description="Students under your classes"
-                  icon="👨‍🎓"
-                />
-
-                <StatCard
-                  title="Active Assignments"
-                  value={
-                    loading
-                      ? "..."
-                      : String(dashboard?.active_assignments ?? 0)
-                  }
-                  description="Currently active"
-                  icon="📝"
-                />
-
-                <StatCard
-                  title="Pending Submissions"
-                  value={
-                    loading
-                      ? "..."
-                      : String(dashboard?.pending_submissions ?? 0)
-                  }
-                  description="Need your review"
-                  icon="📋"
-                />
-              </section>
-
-              <QuickActions />
-
-              <AISection />
-            </>
-          )}
-
-          {/* ================= STUDENT ================= */}
-          {userRole === "student" && (
-            <>
-              <section className="mt-7 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
-                <StatCard
-                  title="Attendance"
-                  value={
-                    loading
-                      ? "..."
-                      : `${dashboard?.attendance_percentage ?? 0}%`
-                  }
-                  description="Overall attendance"
-                  icon="📅"
-                />
-
-                <StatCard
-                  title="Marks Entries"
-                  value={
-                    loading
-                      ? "..."
-                      : String(dashboard?.total_marks_entries ?? 0)
-                  }
-                  description="Academic marks recorded"
-                  icon="📊"
-                />
-
-                <StatCard
-                  title="Pending Assignments"
-                  value={
-                    loading
-                      ? "..."
-                      : String(dashboard?.pending_assignments ?? 0)
-                  }
-                  description="Assignments remaining"
-                  icon="📝"
-                />
-
-                <StatCard
-                  title="Notifications"
-                  value={
-                    loading
-                      ? "..."
-                      : String(dashboard?.unread_notifications ?? 0)
-                  }
-                  description="Unread notifications"
-                  icon="🔔"
-                />
-              </section>
-
-              <QuickActions />
-
-              <AISection />
-            </>
-          )}
-
-          {/* ================= PARENT ================= */}
-          {userRole === "parent" && (
-            <>
-              <section className="mt-7 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
-                <StatCard
-                  title="Children"
-                  value={
-                    loading
-                      ? "..."
-                      : String(dashboard?.children_count ?? 0)
-                  }
-                  description="Children linked to account"
-                  icon="👨‍👩‍👧"
-                />
-
-                <StatCard
-                  title="Notifications"
-                  value={
-                    loading
-                      ? "..."
-                      : String(dashboard?.unread_notifications ?? 0)
-                  }
-                  description="Unread notifications"
-                  icon="🔔"
-                />
-
-                <StatCard
-                  title="Student Profiles"
-                  value={
-                    loading
-                      ? "..."
-                      : String(dashboard?.children?.length ?? 0)
-                  }
-                  description="Available child profiles"
-                  icon="🎓"
-                />
-              </section>
-
-              {/* CHILDREN */}
-              <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="mb-5">
-                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#315b9b]">
-                    Family Overview
-                  </p>
-
-                  <h3 className="mt-1 text-xl font-bold text-[#102a56]">
-                    Your Children
-                  </h3>
-                </div>
-
-                {dashboard?.children &&
-                dashboard.children.length > 0 ? (
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    {dashboard.children.map(
-                      (child: any, index: number) => (
-                        <div
-                          key={child.student_id ?? index}
-                          className="rounded-2xl border border-slate-200 bg-slate-50 p-5"
-                        >
-                          <h4 className="font-bold text-[#102a56]">
-                            {child.name || "Student"}
-                          </h4>
-
-                          <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                            <div>
-                              <p className="text-xs text-slate-400">
-                                Attendance
-                              </p>
-                              <p className="mt-1 font-semibold text-slate-700">
-                                {child.attendance_percentage ?? 0}%
-                              </p>
-                            </div>
-
-                            <div>
-                              <p className="text-xs text-slate-400">
-                                Pending Assignments
-                              </p>
-                              <p className="mt-1 font-semibold text-slate-700">
-                                {child.pending_assignments ?? 0}
-                              </p>
-                            </div>
+                            <p className="mt-1 font-semibold text-slate-700">
+                              {child.pending_assignments ?? 0}
+                            </p>
                           </div>
                         </div>
-                      )
-                    )}
-                  </div>
-                ) : (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
-                    No children linked yet.
-                  </div>
-                )}
-              </section>
+                      </div>
+                    )
+                  )}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                  No children linked yet.
+                </div>
+              )}
+            </section>
 
-              <QuickActions />
+            <QuickActions />
+            <AISection />
+          </>
+        )}
 
-              <AISection />
-            </>
-          )}
-
-          {/* BOTTOM SPACE */}
-          <div className="h-10" />
-        </div>
-      </main>
-    </div>
+        <div className="h-10" />
+      </div>
+    </>
   );
 }
 
@@ -510,9 +480,7 @@ function StatCard({
 
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-sm font-medium text-slate-500">
-            {title}
-          </p>
+          <p className="text-sm font-medium text-slate-500">{title}</p>
 
           <p
             className={`mt-3 truncate text-3xl font-bold tracking-tight ${
@@ -522,9 +490,7 @@ function StatCard({
             {value}
           </p>
 
-          <p className="mt-1 text-xs text-slate-400">
-            {description}
-          </p>
+          <p className="mt-1 text-xs text-slate-400">{description}</p>
         </div>
 
         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-lg">

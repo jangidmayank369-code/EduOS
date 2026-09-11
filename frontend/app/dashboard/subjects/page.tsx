@@ -1,6 +1,11 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  FormEvent,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { useRouter } from "next/navigation";
 
 const API_URL = "http://127.0.0.1:8000";
@@ -32,6 +37,7 @@ export default function SubjectsPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
 
   const [selectedSubject, setSelectedSubject] =
     useState<Subject | null>(null);
@@ -188,6 +194,7 @@ export default function SubjectsPage() {
       setShowEditModal(true);
     } catch (err: any) {
       console.error(err);
+
       setError(
         err.message || "Failed to load subject details."
       );
@@ -216,20 +223,32 @@ export default function SubjectsPage() {
     setSelectedSubject(null);
   };
 
-  const handleInput = (
-    field: keyof SubjectForm,
-    value: string
-  ) => {
-    setForm((previous) => ({
-      ...previous,
-      [field]: value,
-    }));
+  const openDetailsModal = (subject: Subject) => {
+    setError("");
+    setSuccess("");
+    setSelectedSubject(subject);
+    setShowDetailsModal(true);
+  };
+
+  const closeDetailsModal = () => {
+    setShowDetailsModal(false);
+    setSelectedSubject(null);
   };
 
   const handleCreate = async (
     event: FormEvent<HTMLFormElement>
   ) => {
     event.preventDefault();
+
+    if (!form.name.trim()) {
+      setError("Subject name is required.");
+      return;
+    }
+
+    if (!form.code.trim()) {
+      setError("Subject code is required.");
+      return;
+    }
 
     setSubmitting(true);
     setError("");
@@ -271,6 +290,7 @@ export default function SubjectsPage() {
       await fetchSubjects();
     } catch (err: any) {
       console.error(err);
+
       setError(
         err.message || "Failed to create subject."
       );
@@ -285,6 +305,16 @@ export default function SubjectsPage() {
     event.preventDefault();
 
     if (!selectedSubject) return;
+
+    if (!form.name.trim()) {
+      setError("Subject name is required.");
+      return;
+    }
+
+    if (!form.code.trim()) {
+      setError("Subject code is required.");
+      return;
+    }
 
     setSubmitting(true);
     setError("");
@@ -330,6 +360,7 @@ export default function SubjectsPage() {
       await fetchSubjects();
     } catch (err: any) {
       console.error(err);
+
       setError(
         err.message || "Failed to update subject."
       );
@@ -367,7 +398,8 @@ export default function SubjectsPage() {
 
       if (!response.ok) {
         throw new Error(
-          result?.detail || "Failed to deactivate subject."
+          result?.detail ||
+            "Failed to deactivate subject."
         );
       }
 
@@ -381,8 +413,10 @@ export default function SubjectsPage() {
       await fetchSubjects();
     } catch (err: any) {
       console.error(err);
+
       setError(
-        err.message || "Failed to deactivate subject."
+        err.message ||
+          "Failed to deactivate subject."
       );
     } finally {
       setDeleting(false);
@@ -391,7 +425,6 @@ export default function SubjectsPage() {
 
   return (
     <div className="min-h-screen bg-[#f5f7fb] text-slate-900">
-      {/* HEADER */}
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
         <div className="flex min-h-[76px] flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between lg:px-8">
           <div>
@@ -404,7 +437,7 @@ export default function SubjectsPage() {
             </h1>
 
             <p className="mt-0.5 text-xs text-slate-500">
-              Manage the academic subjects offered by the school
+              Manage academic subjects
             </p>
           </div>
 
@@ -412,7 +445,10 @@ export default function SubjectsPage() {
             onClick={openAddModal}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#102a56] px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#183d73] sm:w-auto"
           >
-            <span className="text-lg leading-none">+</span>
+            <span className="text-lg leading-none">
+              +
+            </span>
+
             Add Subject
           </button>
         </div>
@@ -420,7 +456,6 @@ export default function SubjectsPage() {
 
       <main className="px-4 py-6 sm:px-6 lg:px-8 lg:py-7">
         <div className="mx-auto max-w-[1500px]">
-          {/* BREADCRUMB */}
           <div className="mb-6 flex items-center gap-2 text-xs text-slate-400">
             <button
               onClick={() => router.push("/dashboard")}
@@ -436,7 +471,6 @@ export default function SubjectsPage() {
             </span>
           </div>
 
-          {/* SUCCESS */}
           {success && (
             <Alert
               type="success"
@@ -445,7 +479,6 @@ export default function SubjectsPage() {
             />
           )}
 
-          {/* ERROR */}
           {error && (
             <Alert
               type="error"
@@ -454,7 +487,6 @@ export default function SubjectsPage() {
             />
           )}
 
-          {/* STATS */}
           <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <StatCard
               title="Active Subjects"
@@ -473,14 +505,17 @@ export default function SubjectsPage() {
 
             <StatCard
               title="Catalog Status"
-              value={subjects.length > 0 ? "Ready" : "Empty"}
+              value={
+                subjects.length > 0
+                  ? "Ready"
+                  : "Empty"
+              }
               description="Academic catalog"
               icon="✓"
               blue
             />
           </section>
 
-          {/* DIRECTORY */}
           <section className="mt-7 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-200 p-5 lg:p-6">
               <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
@@ -494,7 +529,7 @@ export default function SubjectsPage() {
                   </h2>
 
                   <p className="mt-1 text-sm text-slate-500">
-                    View and manage all active subjects.
+                    School ke academic subjects manage karein.
                   </p>
                 </div>
 
@@ -516,7 +551,6 @@ export default function SubjectsPage() {
               </div>
             </div>
 
-            {/* TABLE */}
             <div className="overflow-x-auto">
               {loading ? (
                 <LoadingTable />
@@ -526,7 +560,7 @@ export default function SubjectsPage() {
                   onAdd={openAddModal}
                 />
               ) : (
-                <table className="min-w-[1050px] w-full">
+                <table className="min-w-[1100px] w-full">
                   <thead>
                     <tr className="border-b border-slate-100 bg-slate-50/80 text-left">
                       <th className="px-6 py-4 text-[11px] font-bold uppercase tracking-wider text-slate-400">
@@ -609,7 +643,9 @@ export default function SubjectsPage() {
 
                           <td className="px-6 py-4">
                             <p className="text-sm font-medium text-slate-600">
-                              {formatDate(subject.created_at)}
+                              {formatDate(
+                                subject.created_at
+                              )}
                             </p>
 
                             <p className="mt-1 text-xs text-slate-400">
@@ -619,6 +655,15 @@ export default function SubjectsPage() {
 
                           <td className="px-6 py-4">
                             <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() =>
+                                  openDetailsModal(subject)
+                                }
+                                className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
+                              >
+                                ⚙ Configure
+                              </button>
+
                               <button
                                 onClick={() =>
                                   openEditModal(subject)
@@ -646,28 +691,30 @@ export default function SubjectsPage() {
               )}
             </div>
 
-            {!loading && filteredSubjects.length > 0 && (
-              <div className="flex flex-col gap-2 border-t border-slate-100 bg-slate-50/50 px-6 py-4 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
-                <span>
-                  Showing{" "}
-                  <strong className="text-slate-600">
-                    {filteredSubjects.length}
-                  </strong>{" "}
-                  of{" "}
-                  <strong className="text-slate-600">
-                    {subjects.length}
-                  </strong>{" "}
-                  active subjects
-                </span>
+            {!loading &&
+              filteredSubjects.length > 0 && (
+                <div className="flex flex-col gap-2 border-t border-slate-100 bg-slate-50/50 px-6 py-4 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
+                  <span>
+                    Showing{" "}
+                    <strong className="text-slate-600">
+                      {filteredSubjects.length}
+                    </strong>{" "}
+                    of{" "}
+                    <strong className="text-slate-600">
+                      {subjects.length}
+                    </strong>{" "}
+                    active subjects
+                  </span>
 
-                <span>EduOS Academic Catalog</span>
-              </div>
-            )}
+                  <span>
+                    EduOS Academic Catalog
+                  </span>
+                </div>
+              )}
           </section>
         </div>
       </main>
 
-      {/* ADD MODAL */}
       {showAddModal && (
         <SubjectModal
           title="Add New Subject"
@@ -682,7 +729,6 @@ export default function SubjectsPage() {
         />
       )}
 
-      {/* EDIT MODAL */}
       {showEditModal && selectedSubject && (
         <SubjectModal
           title="Edit Subject"
@@ -699,83 +745,20 @@ export default function SubjectsPage() {
         />
       )}
 
-      {/* DELETE MODAL */}
       {showDeleteModal && selectedSubject && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl bg-white shadow-2xl">
-            <div className="p-6">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 text-xl">
-                🗑
-              </div>
+        <DeleteSubjectModal
+          subject={selectedSubject}
+          deleting={deleting}
+          onClose={closeDeleteModal}
+          onDelete={handleDelete}
+        />
+      )}
 
-              <h2 className="mt-5 text-xl font-bold text-[#102a56]">
-                Deactivate Subject?
-              </h2>
-
-              <p className="mt-2 text-sm leading-6 text-slate-500">
-                Are you sure you want to deactivate{" "}
-                <strong className="text-slate-700">
-                  {selectedSubject.name}
-                </strong>
-                ?
-              </p>
-
-              <div className="mt-5 rounded-2xl border border-red-100 bg-red-50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wider text-red-500">
-                  Subject Record
-                </p>
-
-                <div className="mt-3 grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-xs text-red-400">
-                      Subject ID
-                    </p>
-
-                    <p className="mt-1 font-semibold text-red-700">
-                      #{selectedSubject.id}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-xs text-red-400">
-                      Code
-                    </p>
-
-                    <p className="mt-1 font-semibold text-red-700">
-                      {selectedSubject.code}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <p className="mt-4 text-xs leading-5 text-slate-400">
-                The backend DELETE operation deactivates the
-                subject rather than permanently removing its
-                database record.
-              </p>
-            </div>
-
-            <div className="flex flex-col-reverse gap-3 border-t border-slate-100 p-5 sm:flex-row sm:justify-end">
-              <button
-                onClick={closeDeleteModal}
-                disabled={deleting}
-                className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-
-              <button
-                onClick={handleDelete}
-                disabled={deleting}
-                className="rounded-xl bg-red-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {deleting
-                  ? "Deactivating..."
-                  : "Yes, Deactivate"}
-              </button>
-            </div>
-          </div>
-        </div>
+      {showDetailsModal && selectedSubject && (
+        <SubjectDetailsModal
+          subject={selectedSubject}
+          onClose={closeDetailsModal}
+        />
       )}
     </div>
   );
@@ -801,12 +784,16 @@ function SubjectModal({
   title: string;
   description: string;
   form: SubjectForm;
-  setForm: React.Dispatch<React.SetStateAction<SubjectForm>>;
+  setForm: React.Dispatch<
+    React.SetStateAction<SubjectForm>
+  >;
   submitting: boolean;
   submitText: string;
   loadingText: string;
   onClose: () => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onSubmit: (
+    event: FormEvent<HTMLFormElement>
+  ) => void;
   editMode?: boolean;
   subjectId?: number;
 }) {
@@ -844,7 +831,8 @@ function SubjectModal({
           <button
             type="button"
             onClick={onClose}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition hover:bg-slate-200"
+            disabled={submitting}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition hover:bg-slate-200 disabled:opacity-50"
           >
             ×
           </button>
@@ -857,7 +845,9 @@ function SubjectModal({
           <div>
             <label className="mb-1.5 block text-xs font-semibold text-slate-600">
               Subject Name
-              <span className="ml-1 text-red-500">*</span>
+              <span className="ml-1 text-red-500">
+                *
+              </span>
             </label>
 
             <input
@@ -878,7 +868,9 @@ function SubjectModal({
           <div>
             <label className="mb-1.5 block text-xs font-semibold text-slate-600">
               Subject Code
-              <span className="ml-1 text-red-500">*</span>
+              <span className="ml-1 text-red-500">
+                *
+              </span>
             </label>
 
             <input
@@ -896,7 +888,8 @@ function SubjectModal({
             />
 
             <p className="mt-1.5 text-[11px] text-slate-400">
-              Use a short unique code such as MATH, SCI or ENG.
+              Use a short unique code such as MATH,
+              SCI or ENG.
             </p>
           </div>
 
@@ -934,11 +927,261 @@ function SubjectModal({
               disabled={submitting}
               className="rounded-xl bg-[#102a56] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#183d73] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {submitting ? loadingText : submitText}
+              {submitting
+                ? loadingText
+                : submitText}
             </button>
           </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   SUBJECT DETAILS MODAL
+========================================================= */
+
+function SubjectDetailsModal({
+  subject,
+  onClose,
+}: {
+  subject: Subject;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[55] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div className="flex items-center gap-4">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#102a56] text-sm font-bold text-white">
+              {subject.name
+                .split(" ")
+                .map((word) => word[0])
+                .join("")
+                .slice(0, 2)
+                .toUpperCase()}
+            </div>
+
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#315b9b]">
+                Subject Configuration
+              </p>
+
+              <h2 className="mt-1 text-2xl font-bold text-[#102a56]">
+                {subject.name}
+              </h2>
+
+              <p className="mt-1 text-xs text-slate-400">
+                Code: {subject.code} · Subject #
+                {subject.id}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl text-slate-500 transition hover:bg-slate-200"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto bg-[#f7f9fc] p-6">
+          <div className="mx-auto max-w-4xl space-y-5">
+            <div className="rounded-2xl border border-slate-200 bg-white p-6">
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#315b9b]">
+                Subject Information
+              </p>
+
+              <div className="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <InfoBox
+                  label="Subject Name"
+                  value={subject.name}
+                />
+
+                <InfoBox
+                  label="Subject Code"
+                  value={subject.code}
+                />
+
+                <InfoBox
+                  label="Subject ID"
+                  value={`#${subject.id}`}
+                />
+
+                <InfoBox
+                  label="Status"
+                  value={
+                    subject.is_active
+                      ? "Active"
+                      : "Inactive"
+                  }
+                />
+              </div>
+
+              <div className="mt-5">
+                <InfoBox
+                  label="Description"
+                  value={
+                    subject.description ||
+                    "No description provided."
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-blue-100 bg-blue-50 p-5">
+              <p className="text-sm font-bold text-blue-900">
+                Academic Subject
+              </p>
+
+              <p className="mt-1 text-sm leading-6 text-blue-700">
+                Ye section sirf academic subject ki
+                basic configuration ke liye hai.
+                Co-Scholastic ab separate module me
+                manage hoga.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end border-t border-slate-200 bg-white px-6 py-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   DELETE SUBJECT MODAL
+========================================================= */
+
+function DeleteSubjectModal({
+  subject,
+  deleting,
+  onClose,
+  onDelete,
+}: {
+  subject: Subject;
+  deleting: boolean;
+  onClose: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-3xl bg-white shadow-2xl">
+        <div className="p-6">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 text-xl">
+            🗑
+          </div>
+
+          <h2 className="mt-5 text-xl font-bold text-[#102a56]">
+            Deactivate Subject?
+          </h2>
+
+          <p className="mt-2 text-sm leading-6 text-slate-500">
+            Are you sure you want to deactivate{" "}
+            <strong className="text-slate-700">
+              {subject.name}
+            </strong>
+            ?
+          </p>
+
+          <div className="mt-5 rounded-2xl border border-red-100 bg-red-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-red-500">
+              Subject Record
+            </p>
+
+            <div className="mt-3 grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-xs text-red-400">
+                  Subject ID
+                </p>
+
+                <p className="mt-1 font-semibold text-red-700">
+                  #{subject.id}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs text-red-400">
+                  Code
+                </p>
+
+                <p className="mt-1 font-semibold text-red-700">
+                  {subject.code}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <p className="mt-4 text-xs leading-5 text-slate-400">
+            Backend DELETE operation subject ko
+            deactivate karega, permanently delete nahi
+            karega.
+          </p>
+        </div>
+
+        <div className="flex flex-col-reverse gap-3 border-t border-slate-100 p-5 sm:flex-row sm:justify-end">
+          <button
+            onClick={onClose}
+            disabled={deleting}
+            className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+
+          <button
+            onClick={onDelete}
+            disabled={deleting}
+            className="rounded-xl bg-red-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {deleting
+              ? "Deactivating..."
+              : "Yes, Deactivate"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   INFO BOX
+========================================================= */
+
+function InfoBox({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+      <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
+        {label}
+      </p>
+
+      <p className="mt-1.5 text-sm font-semibold text-slate-700">
+        {value}
+      </p>
     </div>
   );
 }
@@ -997,14 +1240,17 @@ function StatCard({
   green?: boolean;
   blue?: boolean;
 }) {
-  let iconClass = "bg-slate-100 text-slate-700";
+  let iconClass =
+    "bg-slate-100 text-slate-700";
 
   if (green) {
-    iconClass = "bg-emerald-50 text-emerald-700";
+    iconClass =
+      "bg-emerald-50 text-emerald-700";
   }
 
   if (blue) {
-    iconClass = "bg-blue-50 text-blue-700";
+    iconClass =
+      "bg-blue-50 text-blue-700";
   }
 
   return (

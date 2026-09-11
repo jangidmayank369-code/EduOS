@@ -1,14 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.auth import require_role
 from app.core.database import get_db
+from app.core.rbac import require_permission
 from app.models import Parent, ParentChild, Student, User
 from app.schemas.parent_child import (
     ParentChildCreate,
     ParentChildResponse,
     ParentChildUpdate,
 )
+
 
 router = APIRouter(
     prefix="/parent-children",
@@ -32,7 +33,9 @@ ALLOWED_RELATIONS = {
 )
 def create_parent_child(
     data: ParentChildCreate,
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(
+        require_permission("parents.manage_children")
+    ),
     db: Session = Depends(get_db),
 ):
     parent = (
@@ -127,7 +130,9 @@ def create_parent_child(
 )
 def get_parent_children(
     parent_id: int,
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(
+        require_permission("parents.manage_children")
+    ),
     db: Session = Depends(get_db),
 ):
     parent = (
@@ -164,7 +169,9 @@ def update_parent_child(
     parent_id: int,
     student_id: int,
     data: ParentChildUpdate,
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(
+        require_permission("parents.manage_children")
+    ),
     db: Session = Depends(get_db),
 ):
     relationship = (
@@ -228,7 +235,9 @@ def update_parent_child(
 def delete_parent_child(
     parent_id: int,
     student_id: int,
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(
+        require_permission("parents.manage_children")
+    ),
     db: Session = Depends(get_db),
 ):
     relationship = (

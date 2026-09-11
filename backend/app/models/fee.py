@@ -16,6 +16,22 @@ class Fee(Base):
         nullable=False
     )
 
+    # Links this fee to the fee structure that generated it.
+    # Nullable so all existing fee records remain valid.
+    fee_structure_id: Mapped[int | None] = mapped_column(
+        ForeignKey("fee_structures.id"),
+        nullable=True,
+        index=True
+    )
+
+    # Academic session for which this fee belongs.
+    # Nullable so existing fee records remain valid.
+    academic_session_id: Mapped[int | None] = mapped_column(
+        ForeignKey("academic_sessions.id"),
+        nullable=True,
+        index=True
+    )
+
     title: Mapped[str] = mapped_column(
         String(100),
         nullable=False
@@ -48,3 +64,7 @@ class Fee(Base):
     )
 
     student = relationship("Student")
+
+    fee_structure = relationship("FeeStructure")
+
+    academic_session = relationship("AcademicSession")

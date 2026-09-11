@@ -1,16 +1,18 @@
 from datetime import datetime
 
-
 from pydantic import BaseModel, EmailStr
 
 
 class TeacherCreate(BaseModel):
-    user_id: int
+    # Login account
+    email: EmailStr
+    password: str
+
+    # Teacher profile
     employee_number: str
     first_name: str
     last_name: str
     phone: str | None = None
-    email: EmailStr | None = None
 
 
 class TeacherResponse(BaseModel):

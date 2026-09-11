@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 const API_BASE_URL = "http://127.0.0.1:8000";
 
@@ -26,13 +27,15 @@ const emptyForm: ExamForm = {
 };
 
 export default function ExamsPage() {
+  const router = useRouter();
+
   const [exams, setExams] = useState<Exam[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">(
-    "all"
-  );
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "active" | "inactive"
+  >("all");
 
   const [showFormModal, setShowFormModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
@@ -368,343 +371,218 @@ export default function ExamsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f5f7fb]">
-      <div className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6 lg:px-8">
-        {/* Header */}
-        <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <main className="min-h-screen bg-[#f5f7fb]">
+      <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <div className="mb-2 flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-blue-500" />
-              <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
-                Academic Management
-              </span>
-            </div>
-
-            <h1 className="text-2xl font-bold tracking-tight text-[#102A56] sm:text-3xl">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-600">
+              Academic Management
+            </p>
+            <h1 className="mt-1 text-2xl font-black tracking-tight text-[#102A56] sm:text-3xl">
               Exams
             </h1>
-
-            <p className="mt-1 max-w-2xl text-sm text-slate-500">
-              Create, manage and monitor examinations across your school.
+            <p className="mt-1 text-sm text-slate-500">
+              Create an exam, then complete its setup step by step.
             </p>
           </div>
 
           <button
             onClick={openCreateModal}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#102A56] px-5 text-sm font-semibold text-white shadow-lg shadow-blue-900/15 transition hover:bg-[#0b2145] active:scale-[0.98]"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#102A56] px-5 text-sm font-bold text-white shadow-sm transition hover:bg-[#0b2145]"
           >
-            <span className="text-lg leading-none">+</span>
+            <span className="text-lg">+</span>
             Create Exam
           </button>
         </div>
 
-        {/* Alerts */}
-        {error && (
-          <div className="mb-5 flex items-start justify-between gap-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
-            <div className="flex items-start gap-3">
-              <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-red-100 font-bold">
-                !
-              </span>
-              <span>{error}</span>
-            </div>
-
-            <button
-              onClick={() => setError("")}
-              className="text-red-400 transition hover:text-red-700"
-            >
-              ×
-            </button>
-          </div>
-        )}
-
-        {success && (
-          <div className="mb-5 flex items-center gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 font-bold">
-              ✓
-            </span>
-            {success}
-          </div>
-        )}
-
-        {/* Stats */}
-        <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <StatCard
-            label="Total Exams"
-            value={totalExams}
-            icon="▣"
-            description="All examinations"
-          />
-
-          <StatCard
-            label="Active Exams"
-            value={activeExams}
-            icon="✓"
-            description="Currently active"
-            positive
-          />
-
-          <StatCard
-            label="Inactive Exams"
-            value={inactiveExams}
-            icon="○"
-            description="Archived / inactive"
-          />
-        </div>
-
-        {/* Main Card */}
-        <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-          {/* Toolbar */}
-          <div className="border-b border-slate-100 p-4 sm:p-5">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <h2 className="text-base font-bold text-[#102A56]">
-                  Examination Directory
-                </h2>
-                <p className="mt-1 text-xs text-slate-400">
-                  {filteredExams.length}{" "}
-                  {filteredExams.length === 1 ? "exam" : "exams"} shown
-                </p>
-              </div>
-
-              <div className="flex flex-col gap-3 sm:flex-row">
-                {/* Search */}
-                <div className="relative min-w-0 sm:w-72">
-                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-                    ⌕
-                  </span>
-
-                  <input
-                    type="text"
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Search exams..."
-                    className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-50"
-                  />
-                </div>
-
-                {/* Status */}
-                <select
-                  value={statusFilter}
-                  onChange={(event) =>
-                    setStatusFilter(
-                      event.target.value as "all" | "active" | "inactive"
-                    )
-                  }
-                  className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-600 outline-none transition focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-50"
-                >
-                  <option value="all">All Status</option>
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
-                </select>
-
+        {(error || success) && (
+          <div className="mb-5 space-y-2">
+            {error && (
+              <div className="flex items-start justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                <span>{error}</span>
                 <button
-                  onClick={fetchExams}
-                  disabled={loading}
-                  className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={() => setError("")}
+                  className="font-bold text-red-500 hover:text-red-800"
                 >
-                  {loading ? "Loading..." : "Refresh"}
+                  ×
                 </button>
               </div>
+            )}
+
+            {success && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+                ✓ {success}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="mb-5 grid grid-cols-3 gap-3">
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+            <p className="text-xs font-semibold text-slate-400">Total</p>
+            <p className="mt-1 text-2xl font-black text-[#102A56]">{totalExams}</p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+            <p className="text-xs font-semibold text-slate-400">Active</p>
+            <p className="mt-1 text-2xl font-black text-emerald-600">{activeExams}</p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+            <p className="text-xs font-semibold text-slate-400">Inactive</p>
+            <p className="mt-1 text-2xl font-black text-slate-500">{inactiveExams}</p>
+          </div>
+        </div>
+
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="font-bold text-[#102A56]">Your Examinations</h2>
+              <p className="mt-0.5 text-xs text-slate-400">
+                {filteredExams.length} {filteredExams.length === 1 ? "exam" : "exams"} shown
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search exams..."
+                className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-blue-400 focus:bg-white sm:w-64"
+              />
+
+              <select
+                value={statusFilter}
+                onChange={(event) =>
+                  setStatusFilter(
+                    event.target.value as "all" | "active" | "inactive"
+                  )
+                }
+                className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-600 outline-none focus:border-blue-400 focus:bg-white"
+              >
+                <option value="all">All</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+
+              <button
+                onClick={fetchExams}
+                disabled={loading}
+                className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {loading ? "Loading..." : "Refresh"}
+              </button>
             </div>
           </div>
 
-          {/* Loading */}
           {loading ? (
-            <div className="space-y-3 p-5">
+            <div className="space-y-3 p-4">
               {[1, 2, 3, 4].map((item) => (
-                <div
-                  key={item}
-                  className="h-16 animate-pulse rounded-2xl bg-slate-100"
-                />
+                <div key={item} className="h-20 animate-pulse rounded-xl bg-slate-100" />
               ))}
             </div>
           ) : filteredExams.length === 0 ? (
             <div className="px-6 py-16 text-center">
-              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-2xl text-[#102A56]">
-                ▣
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-xl">
+                📋
               </div>
-
-              <h3 className="text-base font-bold text-[#102A56]">
-                No exams found
-              </h3>
-
-              <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
+              <h3 className="mt-4 font-bold text-[#102A56]">No exams found</h3>
+              <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">
                 {search || statusFilter !== "all"
-                  ? "Try changing your search or filter."
+                  ? "Try changing your search or status filter."
                   : "Create your first examination to get started."}
               </p>
-
               {!search && statusFilter === "all" && (
                 <button
                   onClick={openCreateModal}
-                  className="mt-5 rounded-xl bg-[#102A56] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0b2145]"
+                  className="mt-5 rounded-xl bg-[#102A56] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#0b2145]"
                 >
                   Create First Exam
                 </button>
               )}
             </div>
           ) : (
-            <>
-              {/* Desktop Table */}
-              <div className="hidden overflow-x-auto md:block">
-                <table className="w-full min-w-[800px]">
-                  <thead>
-                    <tr className="border-b border-slate-100 bg-slate-50/70">
-                      <th className="px-5 py-4 text-left text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
-                        Exam
-                      </th>
-                      <th className="px-5 py-4 text-left text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
-                        Description
-                      </th>
-                      <th className="px-5 py-4 text-left text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
-                        Status
-                      </th>
-                      <th className="px-5 py-4 text-left text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
-                        Created
-                      </th>
-                      <th className="px-5 py-4 text-right text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {filteredExams.map((exam) => (
-                      <tr
-                        key={exam.id}
-                        className="group border-b border-slate-100 last:border-0 hover:bg-slate-50/60"
-                      >
-                        <td className="px-5 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#102A56] text-sm font-bold text-white">
-                              {exam.name.charAt(0).toUpperCase()}
-                            </div>
-
-                            <div>
-                              <p className="font-semibold text-slate-800">
-                                {exam.name}
-                              </p>
-                              <p className="mt-0.5 text-xs text-slate-400">
-                                Exam #{exam.id}
-                              </p>
-                            </div>
-                          </div>
-                        </td>
-
-                        <td className="max-w-xs px-5 py-4">
-                          <p className="truncate text-sm text-slate-500">
-                            {exam.description || "No description added"}
-                          </p>
-                        </td>
-
-                        <td className="px-5 py-4">
-                          <StatusBadge active={exam.is_active} />
-                        </td>
-
-                        <td className="px-5 py-4 text-sm text-slate-500">
-                          {formatDate(exam.created_at)}
-                        </td>
-
-                        <td className="px-5 py-4">
-                          <div className="flex justify-end gap-2">
-                            <ActionButton
-                              label="View"
-                              icon="↗"
-                              onClick={() => handleViewExam(exam)}
-                            />
-
-                            <ActionButton
-                              label="Edit"
-                              icon="✎"
-                              onClick={() => openEditModal(exam)}
-                            />
-
-                            <ActionButton
-                              label="Delete"
-                              icon="⌫"
-                              danger
-                              onClick={() => openDeleteModal(exam)}
-                            />
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Mobile Cards */}
-              <div className="space-y-3 p-4 md:hidden">
-                {filteredExams.map((exam) => (
-                  <div
-                    key={exam.id}
-                    className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex min-w-0 items-center gap-3">
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#102A56] text-sm font-bold text-white">
+            <div className="divide-y divide-slate-100">
+              {filteredExams.map((exam) => (
+                <div
+                  key={exam.id}
+                  className="p-4 transition hover:bg-slate-50/60 sm:p-5"
+                >
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <button
+                      onClick={() => router.push(`/dashboard/exams/${exam.id}`)}
+                      className="min-w-0 text-left"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#102A56] text-sm font-black text-white">
                           {exam.name.charAt(0).toUpperCase()}
                         </div>
-
                         <div className="min-w-0">
-                          <h3 className="truncate font-bold text-slate-800">
-                            {exam.name}
-                          </h3>
-
-                          <p className="mt-0.5 text-xs text-slate-400">
-                            Exam #{exam.id}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="truncate font-bold text-slate-800">
+                              {exam.name}
+                            </h3>
+                            <StatusBadge active={exam.is_active} />
+                          </div>
+                          <p className="mt-1 truncate text-xs text-slate-400">
+                            {exam.description || "No description"} · Created {formatDate(exam.created_at)}
                           </p>
                         </div>
                       </div>
+                    </button>
 
-                      <StatusBadge active={exam.is_active} />
-                    </div>
-
-                    <div className="mt-4 rounded-xl bg-slate-50 p-3">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400">
-                        Description
-                      </p>
-
-                      <p className="mt-1 text-sm leading-5 text-slate-600">
-                        {exam.description || "No description added"}
-                      </p>
-                    </div>
-
-                    <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
-                      <span>Created</span>
-                      <span className="font-medium text-slate-600">
-                        {formatDate(exam.created_at)}
-                      </span>
-                    </div>
-
-                    <div className="mt-4 grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:flex lg:items-center">
                       <button
-                        onClick={() => handleViewExam(exam)}
-                        className="rounded-xl bg-slate-50 px-2 py-2.5 text-xs font-semibold text-slate-600 transition hover:bg-blue-50 hover:text-[#102A56]"
+                        onClick={() => router.push(`/dashboard/exams/${exam.id}`)}
+                        className="rounded-xl bg-slate-100 px-3 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-200"
                       >
                         View
                       </button>
-
+                      <button
+                        onClick={() =>
+                          router.push(`/dashboard/exams/subjects?examId=${exam.id}`)
+                        }
+                        className="rounded-xl bg-blue-50 px-3 py-2.5 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                      >
+                        1. Subjects
+                      </button>
+                      <button
+                        onClick={() =>
+                          router.push(`/dashboard/exams/timetable?examId=${exam.id}`)
+                        }
+                        className="rounded-xl bg-emerald-50 px-3 py-2.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100"
+                      >
+                        2. Timetable
+                      </button>
+                      <button
+                        onClick={() => router.push(`/dashboard/marks?examId=${exam.id}`)}
+                        className="rounded-xl bg-purple-50 px-3 py-2.5 text-xs font-bold text-purple-700 hover:bg-purple-100"
+                      >
+                        3. Marks
+                      </button>
+                      <button
+                        onClick={() => router.push(`/dashboard/results?examId=${exam.id}`)}
+                        className="rounded-xl bg-indigo-50 px-3 py-2.5 text-xs font-bold text-indigo-700 hover:bg-indigo-100"
+                      >
+                        4. Results
+                      </button>
                       <button
                         onClick={() => openEditModal(exam)}
-                        className="rounded-xl bg-blue-50 px-2 py-2.5 text-xs font-semibold text-[#102A56] transition hover:bg-blue-100"
+                        className="rounded-xl bg-slate-100 px-3 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-200"
                       >
                         Edit
                       </button>
-
                       <button
                         onClick={() => openDeleteModal(exam)}
-                        className="rounded-xl bg-red-50 px-2 py-2.5 text-xs font-semibold text-red-600 transition hover:bg-red-100"
+                        className="rounded-xl bg-red-50 px-3 py-2.5 text-xs font-bold text-red-600 hover:bg-red-100"
                       >
                         Delete
                       </button>
                     </div>
                   </div>
-                ))}
-              </div>
-            </>
+                </div>
+              ))}
+            </div>
           )}
-        </div>
+        </section>
       </div>
 
       {/* Create / Edit Modal */}
@@ -719,7 +597,9 @@ export default function ExamsPage() {
                   </span>
 
                   <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
-                    {editingExam ? "Update Examination" : "New Examination"}
+                    {editingExam
+                      ? "Update Examination"
+                      : "New Examination"}
                   </span>
                 </div>
 
@@ -743,7 +623,10 @@ export default function ExamsPage() {
               </button>
             </div>
 
-            <form onSubmit={handleSaveExam} className="space-y-5 p-5 sm:p-6">
+            <form
+              onSubmit={handleSaveExam}
+              className="space-y-5 p-5 sm:p-6"
+            >
               <div>
                 <label className="mb-2 block text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
                   Exam Name *
@@ -769,7 +652,10 @@ export default function ExamsPage() {
                 <textarea
                   value={form.description}
                   onChange={(event) =>
-                    handleFormChange("description", event.target.value)
+                    handleFormChange(
+                      "description",
+                      event.target.value
+                    )
                   }
                   placeholder="Enter a short description..."
                   rows={4}
@@ -783,6 +669,7 @@ export default function ExamsPage() {
                     <p className="text-sm font-semibold text-slate-700">
                       Exam Status
                     </p>
+
                     <p className="mt-1 text-xs text-slate-400">
                       Control whether this exam is active.
                     </p>
@@ -791,10 +678,15 @@ export default function ExamsPage() {
                   <button
                     type="button"
                     onClick={() =>
-                      handleFormChange("is_active", !form.is_active)
+                      handleFormChange(
+                        "is_active",
+                        !form.is_active
+                      )
                     }
                     className={`relative h-7 w-12 rounded-full transition ${
-                      form.is_active ? "bg-emerald-500" : "bg-slate-300"
+                      form.is_active
+                        ? "bg-emerald-500"
+                        : "bg-slate-300"
                     }`}
                   >
                     <span
@@ -885,7 +777,8 @@ export default function ExamsPage() {
                 label="Description"
                 value={
                   <span className="leading-6 text-slate-600">
-                    {selectedExam.description || "No description added"}
+                    {selectedExam.description ||
+                      "No description added"}
                   </span>
                 }
               />
@@ -899,6 +792,54 @@ export default function ExamsPage() {
                 label="Last Updated"
                 value={formatDate(selectedExam.updated_at)}
               />
+
+              <div className="border-t border-slate-100 pt-5">
+                <p className="mb-3 text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
+                  Quick Manage
+                </p>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() =>
+                      router.push(
+                        `/dashboard/exams/subjects?examId=${selectedExam.id}`
+                      )
+                    }
+                    className="rounded-xl bg-indigo-50 px-3 py-3 text-sm font-semibold text-indigo-700 hover:bg-indigo-100"
+                  >
+                    📚 Subjects
+                  </button>
+
+                  <button
+                    onClick={() =>
+                      router.push(
+                        `/dashboard/exams/timetable?examId=${selectedExam.id}`
+                      )
+                    }
+                    className="rounded-xl bg-emerald-50 px-3 py-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
+                  >
+                    🗓 Schedule
+                  </button>
+
+                  <button
+                    onClick={() =>
+                      router.push("/dashboard/marks")
+                    }
+                    className="rounded-xl bg-purple-50 px-3 py-3 text-sm font-semibold text-purple-700 hover:bg-purple-100"
+                  >
+                    ✍ Marks Entry
+                  </button>
+
+                  <button
+                    onClick={() =>
+                      router.push("/dashboard/results")
+                    }
+                    className="rounded-xl bg-blue-50 px-3 py-3 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+                  >
+                    📊 Results
+                  </button>
+                </div>
+              </div>
 
               <div className="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end">
                 <button
@@ -973,7 +914,7 @@ export default function ExamsPage() {
           </div>
         </div>
       )}
-    </div>
+  </main>
   );
 }
 
@@ -1002,7 +943,9 @@ function StatCard({
             {value}
           </p>
 
-          <p className="mt-1 text-xs text-slate-400">{description}</p>
+          <p className="mt-1 text-xs text-slate-400">
+            {description}
+          </p>
         </div>
 
         <div
@@ -1033,6 +976,7 @@ function StatusBadge({ active }: { active: boolean }) {
           active ? "bg-emerald-500" : "bg-slate-400"
         }`}
       />
+
       {active ? "Active" : "Inactive"}
     </span>
   );

@@ -8,25 +8,29 @@ const menuItems = [
     path: "/dashboard",
     icon: "▦",
   },
+
+  // Student & People
   {
     label: "Students",
     path: "/dashboard/students",
     icon: "♙",
   },
-  { 
-    label: "Parents", 
-    path: "/dashboard/parents", 
-    icon: "♧" 
+  {
+    label: "Parents",
+    path: "/dashboard/parents",
+    icon: "♧",
   },
   {
     label: "Teachers",
     path: "/dashboard/teachers",
     icon: "♟",
   },
-  { 
-    label: "Academic Sessions", 
-    path: "/dashboard/academic-sessions", 
-    icon: "◷" 
+
+  // Academic Setup
+  {
+    label: "Academic Sessions",
+    path: "/dashboard/academic-sessions",
+    icon: "◷",
   },
   {
     label: "Classes",
@@ -39,6 +43,11 @@ const menuItems = [
     icon: "◆",
   },
   {
+    label: "Co-Scholastic",
+    path: "/dashboard/co-scholastic",
+    icon: "◇",
+  },
+  {
     label: "Class Subjects",
     path: "/dashboard/class-subjects",
     icon: "◇",
@@ -48,26 +57,49 @@ const menuItems = [
     path: "/dashboard/teacher-assignments",
     icon: "◆",
   },
+
+  // Academic Operations
   {
     label: "Attendance",
     path: "/dashboard/attendance",
     icon: "✓",
   },
   {
-    label: "Exams & Marks",
+    label: "Exams",
     path: "/dashboard/exams",
     icon: "▣",
   },
+  {
+    label: "Marks Entry",
+    path: "/dashboard/marks",
+    icon: "✎",
+  },
+  {
+    label: "Results",
+    path: "/dashboard/results",
+    icon: "▤",
+  },
+  {
+    label: "Report Cards",
+    path: "/dashboard/report-cards",
+    icon: "▥",
+  },
+
+  // Other Academic
   {
     label: "Assignments",
     path: "/dashboard/assignments",
     icon: "□",
   },
+
+  // Finance
   {
     label: "Fees",
     path: "/dashboard/fees",
     icon: "₹",
   },
+
+  // Communication
   {
     label: "Notices",
     path: "/dashboard/notices",
@@ -77,6 +109,18 @@ const menuItems = [
     label: "Notifications",
     path: "/dashboard/notifications",
     icon: "◉",
+  },
+
+  // Administration
+  {
+    label: "Users",
+    path: "/dashboard/users",
+    icon: "♙",
+  },
+  {
+    label: "Access Control",
+    path: "/dashboard/roles",
+    icon: "⚿",
   },
 ];
 
@@ -142,21 +186,17 @@ export default function Sidebar() {
             return (
               <button
                 key={item.path}
-                onClick={() =>
-                  handleNavigation(item.path)
-                }
+                onClick={() => handleNavigation(item.path)}
                 className={`group relative flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium transition-all duration-200 ${
                   active
                     ? "bg-[#102A56] text-white shadow-md shadow-blue-900/20"
                     : "text-slate-600 hover:bg-slate-50 hover:text-[#102A56]"
                 }`}
               >
-                {/* Active indicator */}
                 {active && (
                   <span className="absolute left-0 top-1/2 h-7 w-1 -translate-y-1/2 rounded-r-full bg-blue-400" />
                 )}
 
-                {/* Icon */}
                 <span
                   className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm transition-all ${
                     active
@@ -167,7 +207,6 @@ export default function Sidebar() {
                   {item.icon}
                 </span>
 
-                {/* Label */}
                 <span className="truncate">
                   {item.label}
                 </span>
@@ -179,7 +218,6 @@ export default function Sidebar() {
 
       {/* Bottom section */}
       <div className="border-t border-slate-100 px-4 py-4">
-        {/* System status */}
         <div className="mb-3 flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2">
           <span className="h-2 w-2 rounded-full bg-emerald-500" />
 
@@ -188,7 +226,6 @@ export default function Sidebar() {
           </span>
         </div>
 
-        {/* Logout */}
         <button
           onClick={handleLogout}
           className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium text-red-500 transition hover:bg-red-50"

@@ -1,10 +1,11 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr
 
 
 class ParentCreate(BaseModel):
-    user_id: int
+    email: EmailStr
+    password: str
     first_name: str
     last_name: str
     phone: str | None = None
@@ -14,6 +15,7 @@ class ParentUpdate(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     phone: str | None = None
+    email: EmailStr | None = None
     is_active: bool | None = None
 
 

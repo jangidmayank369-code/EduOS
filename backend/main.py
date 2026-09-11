@@ -20,14 +20,22 @@ from app.api.timetable import router as timetable_router
 from app.api.assignments import router as assignments_router
 from app.api.assignment_submissions import router as assignment_submissions_router
 from app.api.notifications import router as notifications_router
+from app.api.users import router as users_router
+from app.api.roles import router as roles_router
 from app.api.dashboard import router as dashboard_router
 from app.api.academic_sessions import router as academic_sessions_router
 from app.api.admissions import router as admissions_router
 from app.api.parent_invitations import router as parent_invitations_router
 from app.api.student_bulk_import import router as student_bulk_import_router
+from app.api.student_bulk_update import router as student_bulk_update_router
 
 
 app = FastAPI()
+
+
+# ---------------------------------------------------------------------------
+# CORS
+# ---------------------------------------------------------------------------
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,36 +43,78 @@ app.add_middleware(
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
+# ---------------------------------------------------------------------------
+# API Routers
+# ---------------------------------------------------------------------------
+
 app.include_router(auth_router)
+
 app.include_router(students_router)
+
 app.include_router(classes_router)
+
 app.include_router(subjects_router)
+
 app.include_router(teachers_router)
+
 app.include_router(teacher_assignments_router)
+
 app.include_router(attendance_router)
+
 app.include_router(exams_router)
+
 app.include_router(exam_subjects_router)
+
 app.include_router(marks_router)
+
 app.include_router(results_router)
+
 app.include_router(parents_router)
+
 app.include_router(parent_children_router)
+
 app.include_router(fees_router)
+
 app.include_router(notices_router)
+
 app.include_router(timetable_router)
+
 app.include_router(assignments_router)
+
 app.include_router(assignment_submissions_router)
+
 app.include_router(notifications_router)
+
+app.include_router(users_router)
+
+app.include_router(roles_router)
+
 app.include_router(dashboard_router)
+
 app.include_router(academic_sessions_router)
+
 app.include_router(admissions_router)
+
 app.include_router(parent_invitations_router)
+
 app.include_router(student_bulk_import_router)
+
+app.include_router(student_bulk_update_router)
+
+
+# ---------------------------------------------------------------------------
+# Root
+# ---------------------------------------------------------------------------
 
 @app.get("/")
 def root():
-    return {"message": "EduOS backend is running"}
+    return {
+        "message": "EduOS backend is running"
+    }

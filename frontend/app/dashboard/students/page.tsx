@@ -3,14 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-type StudentStatus =
-  | "ACTIVE"
-  | "INACTIVE"
-  | "TRANSFERRED"
-  | "WITHDRAWN"
-  | "PASSED_OUT"
-  | "ALUMNI";
-
 type Student = {
   id: number;
   admission_number: string;
@@ -38,6 +30,14 @@ type SchoolClass = {
   id: number;
   name: string;
 };
+
+type StudentStatus =
+  | "ACTIVE"
+  | "INACTIVE"
+  | "TRANSFERRED"
+  | "WITHDRAWN"
+  | "PASSED_OUT"
+  | "ALUMNI";
 
 type StatusHistory = {
   id: number;
@@ -284,7 +284,6 @@ export default function StudentsPage() {
       const data: Student = await response.json();
 
       setEditingStudent(data);
-
       setStudentForm({
         admission_number: data.admission_number,
         first_name: data.first_name,
@@ -386,12 +385,10 @@ export default function StudentsPage() {
 
   const openStatusModal = (student: Student) => {
     setSelectedStudent(student);
-
     setStatusForm({
       status: student.status,
       reason: "",
     });
-
     setShowStatusModal(true);
     setError("");
     setSuccessMessage("");
@@ -480,7 +477,6 @@ export default function StudentsPage() {
 
       if (!response.ok) {
         const data = await response.json();
-
         throw new Error(
           typeof data?.detail === "string"
             ? data.detail
@@ -507,6 +503,10 @@ export default function StudentsPage() {
 
   const openBulkImport = () => {
     router.push("/dashboard/students/bulk-import");
+  };
+
+  const openBulkUpdate = () => {
+    router.push("/dashboard/students/bulk-update");
   };
 
   const formatDate = (value: string | null | undefined) => {
@@ -556,7 +556,6 @@ export default function StudentsPage() {
             </p>
           </div>
 
-          {/* ONLY TWO PRIMARY ACTIONS */}
           <div className="flex flex-col gap-2 sm:flex-row">
             <button
               onClick={openBulkImport}
@@ -564,6 +563,14 @@ export default function StudentsPage() {
             >
               <span className="text-base">⇧</span>
               Bulk Import
+            </button>
+
+            <button
+              onClick={openBulkUpdate}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-5 py-3 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+            >
+              <span className="text-base">↻</span>
+              Bulk Update
             </button>
 
             <button
@@ -592,7 +599,6 @@ export default function StudentsPage() {
             <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-red-100">
               !
             </span>
-
             <div className="flex-1">{error}</div>
 
             <button

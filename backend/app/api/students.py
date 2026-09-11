@@ -4,7 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.api.auth import require_role
+from app.core.rbac import require_permission
+from app.core.security import hash_password
+
 from app.models import (
     Student,
     SchoolClass,
@@ -15,20 +17,26 @@ from app.models import (
     Mark,
     Fee,
     Assignment,
+    User,
+    Role,
 )
+
 from app.schemas.student import (
     StudentCreate,
     StudentResponse,
     StudentUpdate,
 )
+
 from app.schemas.student_360 import (
     Student360Response,
 )
+
 
 router = APIRouter(
     prefix="/students",
     tags=["Students"],
 )
+
 
 ALLOWED_STUDENT_STATUSES = {
     "ACTIVE",
@@ -43,18 +51,34 @@ ALLOWED_STUDENT_STATUSES = {
 def get_status_value(status) -> str:
     if hasattr(status, "value"):
         return status.value
+
     return str(status)
 
 
-@router.post("/", response_model=StudentResponse)
+# =========================================================
+# CREATE STUDENT
+# =========================================================
+
+@router.post(
+    "/",
+    response_model=StudentResponse,
+)
 def create_student(
     data: StudentCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(require_role("admin")),
+    current_user: User = Depends(
+        require_permission("students.create")
+    ),
 ):
+    # -----------------------------------------------------
+    # Admission number must be unique
+    # -----------------------------------------------------
+
     existing_student = (
         db.query(Student)
-        .filter(Student.admission_number == data.admission_number)
+        .filter(
+            Student.admission_number == data.admission_number
+        )
         .first()
     )
 
@@ -63,6 +87,26 @@ def create_student(
             status_code=400,
             detail="Admission number is already registered",
         )
+
+    # -----------------------------------------------------
+    # Login email must be unique
+    # -----------------------------------------------------
+
+    existing_user = (
+        db.query(User)
+        .filter(User.email == data.email)
+        .first()
+    )
+
+    if existing_user:
+        raise HTTPException(
+            status_code=400,
+            detail="Email is already registered",
+        )
+
+    # -----------------------------------------------------
+    # Validate class
+    # -----------------------------------------------------
 
     if data.class_id is not None:
         school_class = (
@@ -80,7 +124,47 @@ def create_student(
                 detail="Class not found or inactive",
             )
 
+    # -----------------------------------------------------
+    # Find STUDENT RBAC role
+    # -----------------------------------------------------
+
+    student_role = (
+        db.query(Role)
+        .filter(
+            Role.name == "STUDENT",
+            Role.is_active.is_(True),
+        )
+        .first()
+    )
+
+    if not student_role:
+        raise HTTPException(
+            status_code=500,
+            detail="STUDENT RBAC role is not configured",
+        )
+
+    # -----------------------------------------------------
+    # Create User account first
+    # -----------------------------------------------------
+
+    new_user = User(
+        email=data.email,
+        password_hash=hash_password(data.password),
+        role="student",
+        role_id=student_role.id,
+    )
+
+    db.add(new_user)
+
+    # Get generated User ID without committing yet.
+    db.flush()
+
+    # -----------------------------------------------------
+    # Create Student profile
+    # -----------------------------------------------------
+
     new_student = Student(
+        user_id=new_user.id,
         admission_number=data.admission_number,
         first_name=data.first_name,
         last_name=data.last_name,
@@ -93,30 +177,66 @@ def create_student(
     )
 
     db.add(new_student)
-    db.commit()
+
+    # -----------------------------------------------------
+    # ONE TRANSACTION
+    #
+    # Either User + Student both get created,
+    # or neither gets created.
+    # -----------------------------------------------------
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to create student account",
+        )
+
     db.refresh(new_student)
 
     return new_student
 
 
-@router.get("/", response_model=list[StudentResponse])
+# =========================================================
+# LIST STUDENTS
+# =========================================================
+
+@router.get(
+    "/",
+    response_model=list[StudentResponse],
+)
 def get_students(
     db: Session = Depends(get_db),
-    current_user=Depends(require_role("admin")),
+    current_user: User = Depends(
+        require_permission("students.view")
+    ),
 ):
     students = (
         db.query(Student)
-        .filter(Student.is_active.is_(True))
+        .filter(
+            Student.is_active.is_(True)
+        )
         .all()
     )
 
     return students
 
 
-@router.get("/current/active")
+# =========================================================
+# ACTIVE STUDENTS
+# =========================================================
+
+@router.get(
+    "/current/active"
+)
 def get_active_students(
     db: Session = Depends(get_db),
-    current_user=Depends(require_role("admin")),
+    current_user: User = Depends(
+        require_permission("students.view")
+    ),
 ):
     students = (
         db.query(Student)
@@ -130,11 +250,20 @@ def get_active_students(
     return students
 
 
-@router.get("/{student_id}/360", response_model=Student360Response)
+# =========================================================
+# STUDENT 360
+# =========================================================
+
+@router.get(
+    "/{student_id}/360",
+    response_model=Student360Response,
+)
 def get_student_360(
     student_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(require_role("admin")),
+    current_user: User = Depends(
+        require_permission("students.view")
+    ),
 ):
     """
     Complete Student 360 view.
@@ -142,6 +271,10 @@ def get_student_360(
     Combines all currently available student-related data
     into one response.
     """
+
+    # -----------------------------------------------------
+    # STUDENT
+    # -----------------------------------------------------
 
     student = (
         db.query(Student)
@@ -155,16 +288,18 @@ def get_student_360(
             detail="Student not found",
         )
 
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
     # CLASS
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
 
     school_class = None
 
     if student.class_id is not None:
         school_class = (
             db.query(SchoolClass)
-            .filter(SchoolClass.id == student.class_id)
+            .filter(
+                SchoolClass.id == student.class_id
+            )
             .first()
         )
 
@@ -176,9 +311,9 @@ def get_student_360(
             "name": school_class.name,
         }
 
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
     # PARENTS / GUARDIANS
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
 
     parent_relationships = (
         db.query(ParentChild)
@@ -193,7 +328,9 @@ def get_student_360(
     for relationship in parent_relationships:
         parent = (
             db.query(Parent)
-            .filter(Parent.id == relationship.parent_id)
+            .filter(
+                Parent.id == relationship.parent_id
+            )
             .first()
         )
 
@@ -213,9 +350,9 @@ def get_student_360(
             }
         )
 
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
     # STATUS HISTORY
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
 
     status_history_rows = (
         db.query(StudentStatusHistory)
@@ -240,9 +377,9 @@ def get_student_360(
         for item in status_history_rows
     ]
 
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
     # ATTENDANCE
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
 
     attendance_rows = (
         db.query(Attendance)
@@ -265,9 +402,9 @@ def get_student_360(
         for item in attendance_rows
     ]
 
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
     # MARKS
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
 
     mark_rows = (
         db.query(Mark)
@@ -291,9 +428,9 @@ def get_student_360(
         for item in mark_rows
     ]
 
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
     # FEES
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
 
     fee_rows = (
         db.query(Fee)
@@ -316,14 +453,13 @@ def get_student_360(
         for item in fee_rows
     ]
 
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
     # ASSIGNMENTS
-    # ---------------------------------------------------------
-    #
+    # -----------------------------------------------------
+
     # The current Assignment model is class-based.
     # Therefore we only return assignments belonging to
     # the student's current class.
-    #
 
     assignments = []
 
@@ -351,19 +487,18 @@ def get_student_360(
             for item in assignment_rows
         ]
 
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
     # DOCUMENTS
-    # ---------------------------------------------------------
-    #
+    # -----------------------------------------------------
+
     # Document module has not been implemented yet.
     # Keep the contract ready without inventing data.
-    #
 
     documents = []
 
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
     # RESPONSE
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
 
     return {
         "student": {
@@ -395,11 +530,19 @@ def get_student_360(
     }
 
 
-@router.get("/{student_id}/status-history")
+# =========================================================
+# STATUS HISTORY
+# =========================================================
+
+@router.get(
+    "/{student_id}/status-history"
+)
 def get_student_status_history(
     student_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(require_role("admin")),
+    current_user: User = Depends(
+        require_permission("students.view")
+    ),
 ):
     student = (
         db.query(Student)
@@ -438,13 +581,22 @@ def get_student_status_history(
     ]
 
 
-@router.patch("/{student_id}/status", response_model=StudentResponse)
+# =========================================================
+# UPDATE STUDENT STATUS
+# =========================================================
+
+@router.patch(
+    "/{student_id}/status",
+    response_model=StudentResponse,
+)
 def update_student_status(
     student_id: int,
     status: str,
     reason: str | None = None,
     db: Session = Depends(get_db),
-    current_user=Depends(require_role("admin")),
+    current_user: User = Depends(
+        require_permission("students.update")
+    ),
 ):
     student = (
         db.query(Student)
@@ -484,7 +636,27 @@ def update_student_status(
     student.status_changed_at = datetime.utcnow()
     student.status_reason = reason
 
+    # Only ACTIVE students remain active in the system.
     student.is_active = normalized_status == "ACTIVE"
+
+    # -----------------------------------------------------
+    # Sync login account
+    # -----------------------------------------------------
+
+    user = (
+        db.query(User)
+        .filter(
+            User.id == student.user_id
+        )
+        .first()
+    )
+
+    if user:
+        user.is_active = student.is_active
+
+    # -----------------------------------------------------
+    # Status history
+    # -----------------------------------------------------
 
     history_entry = StudentStatusHistory(
         student_id=student.id,
@@ -502,11 +674,20 @@ def update_student_status(
     return student
 
 
-@router.get("/{student_id}", response_model=StudentResponse)
+# =========================================================
+# GET STUDENT
+# =========================================================
+
+@router.get(
+    "/{student_id}",
+    response_model=StudentResponse,
+)
 def get_student(
     student_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(require_role("admin")),
+    current_user: User = Depends(
+        require_permission("students.view")
+    ),
 ):
     student = (
         db.query(Student)
@@ -523,12 +704,21 @@ def get_student(
     return student
 
 
-@router.put("/{student_id}", response_model=StudentResponse)
+# =========================================================
+# UPDATE STUDENT
+# =========================================================
+
+@router.put(
+    "/{student_id}",
+    response_model=StudentResponse,
+)
 def update_student(
     student_id: int,
     data: StudentUpdate,
     db: Session = Depends(get_db),
-    current_user=Depends(require_role("admin")),
+    current_user: User = Depends(
+        require_permission("students.update")
+    ),
 ):
     student = (
         db.query(Student)
@@ -545,6 +735,10 @@ def update_student(
     update_data = data.model_dump(
         exclude_unset=True
     )
+
+    # -----------------------------------------------------
+    # Validate class
+    # -----------------------------------------------------
 
     if (
         "class_id" in update_data
@@ -565,6 +759,49 @@ def update_student(
                 detail="Class not found or inactive",
             )
 
+    # -----------------------------------------------------
+    # Sync login email
+    # -----------------------------------------------------
+
+    if "email" in update_data:
+        new_email = update_data["email"]
+
+        if new_email:
+            existing_user = (
+                db.query(User)
+                .filter(
+                    User.email == new_email,
+                    User.id != student.user_id,
+                )
+                .first()
+            )
+
+            if existing_user:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Email is already registered",
+                )
+
+            user = (
+                db.query(User)
+                .filter(
+                    User.id == student.user_id
+                )
+                .first()
+            )
+
+            if not user:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Student login account not found",
+                )
+
+            user.email = new_email
+
+    # -----------------------------------------------------
+    # Update Student profile
+    # -----------------------------------------------------
+
     for field, value in update_data.items():
         setattr(student, field, value)
 
@@ -574,11 +811,20 @@ def update_student(
     return student
 
 
-@router.delete("/{student_id}", response_model=StudentResponse)
+# =========================================================
+# DEACTIVATE STUDENT
+# =========================================================
+
+@router.delete(
+    "/{student_id}",
+    response_model=StudentResponse,
+)
 def deactivate_student(
     student_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(require_role("admin")),
+    current_user: User = Depends(
+        require_permission("students.delete")
+    ),
 ):
     student = (
         db.query(Student)
@@ -610,6 +856,21 @@ def deactivate_student(
         db.add(history_entry)
 
     student.is_active = False
+
+    # -----------------------------------------------------
+    # Deactivate linked login account too
+    # -----------------------------------------------------
+
+    user = (
+        db.query(User)
+        .filter(
+            User.id == student.user_id
+        )
+        .first()
+    )
+
+    if user:
+        user.is_active = False
 
     db.commit()
     db.refresh(student)
