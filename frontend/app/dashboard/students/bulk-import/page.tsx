@@ -23,6 +23,12 @@ type PreviewRow = {
   valid?: boolean;
 };
 
+type ValidationError = {
+  row_number?: number;
+  errors?: string[];
+  data?: Record<string, string>;
+};
+
 type PreviewResponse = {
   import_job_id: number;
   module?: string;
@@ -32,11 +38,8 @@ type PreviewResponse = {
   successful_rows?: number;
   failed_rows: number;
   can_import: boolean;
-  errors?: Array<{
-    row?: number;
-    field?: string;
-    message?: string;
-  }>;
+  unknown_columns?: string[];
+  errors?: ValidationError[];
   rows?: PreviewRow[];
   preview?: PreviewRow[];
 };
@@ -47,7 +50,11 @@ type ConfirmResponse = {
   total_rows?: number;
   successful_rows?: number;
   failed_rows?: number;
-  parent_invitations_created?: number;
+  parent_invitations?: Array<{
+    student_admission_number?: string;
+    parent_email?: string;
+    invitation_token?: string;
+  }>;
 };
 
 export default function MasterStudent360ImportPage() {
@@ -71,6 +78,35 @@ export default function MasterStudent360ImportPage() {
     localStorage.removeItem("access_token");
     localStorage.removeItem("user_role");
     router.push("/login");
+  };
+
+  const getApiError = (data: unknown, fallback: string) => {
+    if (typeof data !== "object" || data === null) return fallback;
+
+    const body = data as { detail?: unknown };
+    if (typeof body.detail === "string") return body.detail;
+
+    if (typeof body.detail === "object" && body.detail !== null) {
+      const detail = body.detail as {
+        missing_columns?: unknown;
+        allowed_columns?: unknown;
+        message?: unknown;
+      };
+      const parts: string[] = [];
+
+      if (Array.isArray(detail.missing_columns) && detail.missing_columns.length) {
+        parts.push(`Missing required columns: ${detail.missing_columns.join(", ")}`);
+      }
+
+      if (Array.isArray(detail.allowed_columns) && detail.allowed_columns.length) {
+        parts.push(`Allowed columns: ${detail.allowed_columns.join(", ")}`);
+      }
+
+      if (parts.length) return parts.join(" · ");
+      if (typeof detail.message === "string") return detail.message;
+    }
+
+    return fallback;
   };
 
   const apiFetch = async (
@@ -140,11 +176,7 @@ export default function MasterStudent360ImportPage() {
       if (!response.ok) {
         const data = await response.json().catch(() => null);
 
-        throw new Error(
-          typeof data?.detail === "string"
-            ? data.detail
-            : "Failed to download master template.",
-        );
+        throw new Error(getApiError(data, "Failed to download master template."));
       }
 
       const blob = await response.blob();
@@ -152,7 +184,7 @@ export default function MasterStudent360ImportPage() {
 
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = "student_360_master_import_template.csv";
+      anchor.download = "student_master_import_template.csv";
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
@@ -198,11 +230,7 @@ export default function MasterStudent360ImportPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(
-          typeof data?.detail === "string"
-            ? data.detail
-            : "Failed to validate import file.",
-        );
+        throw new Error(getApiError(data, "Failed to validate import file."));
       }
 
       setPreview(data);
@@ -251,11 +279,7 @@ export default function MasterStudent360ImportPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(
-          typeof data?.detail === "string"
-            ? data.detail
-            : "Failed to complete import.",
-        );
+        throw new Error(getApiError(data, "Failed to complete import."));
       }
 
       setResult(data);
@@ -630,40 +654,61 @@ export default function MasterStudent360ImportPage() {
                   <h3 className="text-sm font-bold text-red-800">
                     Validation Errors
                   </h3>
-
                   <p className="mt-1 text-xs text-red-600">
                     Fix these issues in the CSV and upload the file again.
                     Nothing will be imported while validation errors exist.
                   </p>
                 </div>
 
-                <div className="max-h-[350px] overflow-auto p-4">
+                <div className="max-h-[420px] overflow-auto p-4">
                   <div className="space-y-2">
                     {preview.errors.map((item, index) => (
                       <div
-                        key={index}
+                        key={`${item.row_number ?? "row"}-${index}`}
                         className="rounded-xl border border-red-100 bg-red-50/50 px-4 py-3"
                       >
-                        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
-                          {item.row !== undefined && (
-                            <span className="font-bold text-red-700">
-                              Row {item.row}
+                        <div className="flex flex-wrap items-start gap-3 text-xs">
+                          {item.row_number !== undefined && (
+                            <span className="rounded-full bg-red-100 px-2.5 py-1 font-bold text-red-700">
+                              Row {item.row_number}
                             </span>
                           )}
-
-                          {item.field && (
-                            <span className="font-semibold text-slate-600">
-                              {item.field}
-                            </span>
-                          )}
-
-                          <span className="text-slate-600">
-                            {item.message || "Invalid value"}
-                          </span>
+                          <div className="min-w-0 flex-1">
+                            {(item.errors || []).map((message, errorIndex) => (
+                              <p
+                                key={errorIndex}
+                                className="leading-5 text-slate-700"
+                              >
+                                {message}
+                              </p>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     ))}
                   </div>
+                </div>
+              </div>
+            )}
+
+            {preview.unknown_columns && preview.unknown_columns.length > 0 && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
+                <p className="text-sm font-bold text-amber-800">
+                  Unsupported CSV columns detected
+                </p>
+                <p className="mt-1 text-xs leading-5 text-amber-700">
+                  These columns are ignored by the backend. Remove them and
+                  download the official template if you want a clean import.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {preview.unknown_columns.map((column) => (
+                    <code
+                      key={column}
+                      className="rounded-md bg-white px-2 py-1 text-[10px] font-semibold text-amber-800 ring-1 ring-amber-200"
+                    >
+                      {column}
+                    </code>
+                  ))}
                 </div>
               </div>
             )}
@@ -859,13 +904,59 @@ export default function MasterStudent360ImportPage() {
               />
             </div>
 
-            {typeof result.parent_invitations_created === "number" && (
-              <div className="mx-5 mb-5 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700 sm:mx-6 sm:mb-6">
-                <strong>{result.parent_invitations_created}</strong> parent
-                invitation(s) were created for newly onboarded parent
-                accounts.
-              </div>
-            )}
+            {Array.isArray(result.parent_invitations) &&
+              result.parent_invitations.length > 0 && (
+                <div className="mx-5 mb-5 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700 sm:mx-6 sm:mb-6">
+                  <strong>{result.parent_invitations.length}</strong> parent
+                  invitation(s) were created for newly onboarded parent
+                  accounts.
+                </div>
+              )}
+
+            {Array.isArray(result.parent_invitations) &&
+              result.parent_invitations.length > 0 && (
+                <div className="mx-5 mb-5 overflow-hidden rounded-xl border border-slate-200 sm:mx-6">
+                  <div className="border-b border-slate-100 bg-slate-50 px-4 py-3">
+                    <h3 className="text-xs font-bold uppercase tracking-wide text-[#102A56]">
+                      Parent Invitations
+                    </h3>
+                  </div>
+                  <div className="max-h-60 overflow-auto">
+                    <table className="w-full min-w-[520px]">
+                      <thead>
+                        <tr className="border-b border-slate-100 text-left">
+                          <th className="px-4 py-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                            Student
+                          </th>
+                          <th className="px-4 py-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                            Parent Email
+                          </th>
+                          <th className="px-4 py-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                            Invitation Token
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {result.parent_invitations.map((invitation, index) => (
+                          <tr key={`${invitation.parent_email ?? "parent"}-${index}`}>
+                            <td className="px-4 py-3 text-xs font-semibold text-slate-700">
+                              {invitation.student_admission_number || "—"}
+                            </td>
+                            <td className="px-4 py-3 text-xs text-slate-600">
+                              {invitation.parent_email || "—"}
+                            </td>
+                            <td className="px-4 py-3">
+                              <code className="break-all text-[10px] text-slate-500">
+                                {invitation.invitation_token || "—"}
+                              </code>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
 
             <div className="flex flex-col gap-3 border-t border-slate-100 p-5 sm:flex-row sm:justify-center sm:p-6">
               <Link

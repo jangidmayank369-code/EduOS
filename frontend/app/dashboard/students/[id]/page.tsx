@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
-const API_URL = "http://127.0.0.1:8000";
+const API_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
 type Parent = {
   parent_id: number;
@@ -186,61 +186,72 @@ export default function Student360Page() {
   const [error, setError] = useState("");
 
   const [activeSection, setActiveSection] = useState("overview");
+  const [refreshing, setRefreshing] = useState(false);
 
+  const loadStudent360 = async () => {
+    if (!studentId) return;
+
+    setError("");
+
+    try {
+      const token = getToken();
+
+      if (!token) {
+        router.push("/login");
+        return;
+      }
+
+      const response = await fetch(
+        `${API_URL}/students/${studentId}/360`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (response.status === 401) {
+        localStorage.removeItem("access_token");
+        localStorage.removeItem("user_role");
+        router.push("/login");
+        return;
+      }
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(
+          body?.detail || "Unable to load student information"
+        );
+      }
+
+      const result = await response.json();
+      setData(result);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to load student information"
+      );
+    }
+  };
+
+  const refreshStudent360 = async () => {
+    setRefreshing(true);
+    await loadStudent360();
+    setRefreshing(false);
+  };
+
+  /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
   useEffect(() => {
     if (!studentId) return;
 
-    const fetchStudent360 = async () => {
-      setLoading(true);
-      setError("");
+    setLoading(true);
 
-      try {
-        const token = getToken();
-
-        if (!token) {
-          router.push("/login");
-          return;
-        }
-
-        const response = await fetch(
-          `${API_URL}/students/${studentId}/360`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
-
-        if (response.status === 401) {
-          localStorage.removeItem("access_token");
-          localStorage.removeItem("user_role");
-          router.push("/login");
-          return;
-        }
-
-        if (!response.ok) {
-          const body = await response.json().catch(() => null);
-
-          throw new Error(
-            body?.detail || "Unable to load student information"
-          );
-        }
-
-        const result = await response.json();
-        setData(result);
-      } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Unable to load student information"
-        );
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchStudent360();
+    loadStudent360().finally(() => {
+      setLoading(false);
+    });
   }, [studentId, router]);
+  /* eslint-enable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 
   const attendanceSummary = useMemo(() => {
     if (!data?.attendance?.length) {
@@ -373,13 +384,24 @@ export default function Student360Page() {
       <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
         {/* Top navigation */}
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-          <button
-            onClick={() => router.push("/dashboard/students")}
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
-          >
-            <span>←</span>
-            Students
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => router.push("/dashboard/students")}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              <span>←</span>
+              Students
+            </button>
+
+            <button
+              onClick={refreshStudent360}
+              disabled={refreshing}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <span>{refreshing ? "↻" : "⟳"}</span>
+              {refreshing ? "Refreshing..." : "Refresh"}
+            </button>
+          </div>
 
           <div className="text-xs font-medium text-slate-400">
             Student 360 · ID #{student.id}

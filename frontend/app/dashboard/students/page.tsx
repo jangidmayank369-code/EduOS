@@ -101,6 +101,7 @@ export default function StudentsPage() {
 
   const [studentForm, setStudentForm] = useState({
     admission_number: "",
+    password: "",
     first_name: "",
     last_name: "",
     date_of_birth: "",
@@ -199,10 +200,12 @@ export default function StudentsPage() {
     }
   };
 
+  /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
   useEffect(() => {
     loadStudents();
     loadClasses();
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 
   const filteredStudents = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -247,6 +250,7 @@ export default function StudentsPage() {
   const resetStudentForm = () => {
     setStudentForm({
       admission_number: "",
+      password: "",
       first_name: "",
       last_name: "",
       date_of_birth: "",
@@ -314,6 +318,16 @@ export default function StudentsPage() {
 
     if (!editingStudent && !studentForm.admission_number.trim()) {
       setError("Admission number is required.");
+      return;
+    }
+
+    if (!editingStudent && studentForm.password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+
+    if (!studentForm.email.trim()) {
+      setError("Email is required.");
       return;
     }
 
@@ -494,6 +508,49 @@ export default function StudentsPage() {
       );
     } finally {
       setHistoryLoading(false);
+    }
+  };
+
+  const deactivateStudent = async (student: Student) => {
+    const confirmed = window.confirm(
+      `Deactivate ${student.first_name} ${student.last_name}? This will mark the student as INACTIVE and disable the linked login account. Academic records will be preserved.`,
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setSaving(true);
+      setError("");
+      setSuccessMessage("");
+
+      const response = await apiFetch(`/students/${student.id}`, {
+        method: "DELETE",
+      });
+
+      if (response.status === 401) {
+        handleUnauthorized();
+        return;
+      }
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          typeof data?.detail === "string"
+            ? data.detail
+            : "Failed to deactivate student",
+        );
+      }
+
+      await loadStudents();
+      setSuccessMessage("Student deactivated successfully.");
+      setTimeout(() => setSuccessMessage(""), 4000);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to deactivate student",
+      );
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -853,6 +910,14 @@ export default function StudentsPage() {
                             >
                               Edit
                             </button>
+
+                            <button
+                              onClick={() => deactivateStudent(student)}
+                              disabled={saving || student.status === "INACTIVE"}
+                              className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              Deactivate
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -929,7 +994,7 @@ export default function StudentsPage() {
                       </div>
                     )}
 
-                    <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
                       <button
                         onClick={() => openStudentProfile(student.id)}
                         className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
@@ -956,6 +1021,14 @@ export default function StudentsPage() {
                         className="rounded-lg bg-[#102A56] px-3 py-2 text-xs font-semibold text-white hover:bg-[#17386f]"
                       >
                         Edit
+                      </button>
+
+                      <button
+                        onClick={() => deactivateStudent(student)}
+                        disabled={saving || student.status === "INACTIVE"}
+                        className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Deactivate
                       </button>
                     </div>
                   </div>
@@ -1009,6 +1082,31 @@ export default function StudentsPage() {
                     placeholder="ADM001"
                     className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-50"
                   />
+                </div>
+              )}
+
+              {!editingStudent && (
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">
+                    Password *
+                  </label>
+
+                  <input
+                    type="password"
+                    value={studentForm.password}
+                    onChange={(event) =>
+                      setStudentForm((prev) => ({
+                        ...prev,
+                        password: event.target.value,
+                      }))
+                    }
+                    placeholder="Minimum 8 characters"
+                    autoComplete="new-password"
+                    className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-50"
+                  />
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    Used for the student&apos;s linked login account.
+                  </p>
                 </div>
               )}
 
@@ -1115,7 +1213,7 @@ export default function StudentsPage() {
 
               <div>
                 <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">
-                  Email
+                  Email *
                 </label>
 
                 <input
@@ -1283,7 +1381,7 @@ export default function StudentsPage() {
               </div>
 
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-700">
-                Status changes are recorded in the student's history. Academic
+                Status changes are recorded in the student&apos;s history. Academic
                 records are not deleted.
               </div>
             </div>
@@ -1355,7 +1453,7 @@ export default function StudentsPage() {
                   </p>
 
                   <p className="mt-1 text-xs text-slate-400">
-                    The student's lifecycle history will appear here.
+                    The student&apos;s lifecycle history will appear here.
                   </p>
                 </div>
               ) : (

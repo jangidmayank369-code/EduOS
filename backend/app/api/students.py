@@ -214,11 +214,12 @@ def get_students(
         require_permission("students.view")
     ),
 ):
+    # Return the complete student registry, including inactive/lifecycle records.
+    # The dedicated /current/active endpoint remains available when callers need
+    # only students whose lifecycle status is ACTIVE.
     students = (
         db.query(Student)
-        .filter(
-            Student.is_active.is_(True)
-        )
+        .order_by(Student.id.asc())
         .all()
     )
 

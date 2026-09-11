@@ -643,6 +643,17 @@ def confirm_bulk_update(
                     student.status_changed_at = datetime.utcnow()
                     student.is_active = new_status == "ACTIVE"
 
+                    # Keep the linked login account synchronized with the
+                    # student's lifecycle status.
+                    if student.user_id:
+                        linked_user = (
+                            db.query(User)
+                            .filter(User.id == student.user_id)
+                            .first()
+                        )
+                        if linked_user:
+                            linked_user.is_active = student.is_active
+
             updated_students.append(
                 {
                     "student_id": student.id,
