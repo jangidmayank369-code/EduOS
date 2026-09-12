@@ -28,9 +28,16 @@ type Student360 = {
     phone: string | null;
     address: string | null;
     class_id: number | null;
+    section_id: number | null;
     school_class: {
       id: number;
       name: string;
+    } | null;
+    section: {
+      id: number;
+      class_id: number;
+      name: string;
+      class_teacher_id: number | null;
     } | null;
     is_active: boolean;
     status: string;
@@ -448,6 +455,13 @@ export default function Student360Page() {
                         {student.school_class?.name || "Not assigned"}
                       </strong>
                     </span>
+
+                    <span>
+                      Section:{" "}
+                      <strong className="text-white">
+                        {student.section?.name || "Not assigned"}
+                      </strong>
+                    </span>
                   </div>
 
                   <p className="mt-2 text-xs text-slate-400">
@@ -539,6 +553,11 @@ export default function Student360Page() {
                 <InfoItem
                   label="Class"
                   value={student.school_class?.name || "Not assigned"}
+                />
+
+                <InfoItem
+                  label="Section"
+                  value={student.section?.name || "Not assigned"}
                 />
 
                 <InfoItem

@@ -5,6 +5,9 @@ from app.api.auth import router as auth_router
 from app.api.students import router as students_router
 from app.api.classes import router as classes_router
 from app.api.subjects import router as subjects_router
+from app.api.co_scholastic import router as co_scholastic_router
+from app.api.sections import router as sections_router
+from app.api.section_academics import router as section_academics_router
 from app.api.teachers import router as teachers_router
 from app.api.teacher_assignments import router as teacher_assignments_router
 from app.api.attendance import router as attendance_router
@@ -28,8 +31,14 @@ from app.api.admissions import router as admissions_router
 from app.api.parent_invitations import router as parent_invitations_router
 from app.api.student_bulk_import import router as student_bulk_import_router
 from app.api.student_bulk_update import router as student_bulk_update_router
-
-
+from app.api.teacher_employment import router as teacher_employment_router
+from app.api.teacher_academic import router as teacher_academic_router
+from app.api.teacher_attendance import router as teacher_attendance_router
+from app.api.teacher_salary import router as teacher_salary_router
+from app.api.teacher_document import router as teacher_document_router
+from app.api.teacher_360 import router as teacher_360_router
+from app.api.teacher_tasks import router as teacher_tasks_router
+from app.api.teacher_workspace import router as teacher_workspace_router
 app = FastAPI()
 
 
@@ -55,60 +64,43 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 
 app.include_router(auth_router)
-
 app.include_router(students_router)
-
 app.include_router(classes_router)
-
 app.include_router(subjects_router)
-
+app.include_router(co_scholastic_router)
+app.include_router(sections_router)
+app.include_router(section_academics_router)
 app.include_router(teachers_router)
-
 app.include_router(teacher_assignments_router)
-
 app.include_router(attendance_router)
-
 app.include_router(exams_router)
-
 app.include_router(exam_subjects_router)
-
 app.include_router(marks_router)
-
 app.include_router(results_router)
-
 app.include_router(parents_router)
-
 app.include_router(parent_children_router)
-
 app.include_router(fees_router)
-
 app.include_router(notices_router)
-
 app.include_router(timetable_router)
-
 app.include_router(assignments_router)
-
 app.include_router(assignment_submissions_router)
-
 app.include_router(notifications_router)
-
 app.include_router(users_router)
-
 app.include_router(roles_router)
-
 app.include_router(dashboard_router)
-
 app.include_router(academic_sessions_router)
-
 app.include_router(admissions_router)
-
 app.include_router(parent_invitations_router)
-
 app.include_router(student_bulk_import_router)
-
 app.include_router(student_bulk_update_router)
-
-
+app.include_router(teacher_employment_router)
+app.include_router(teacher_academic_router)
+app.include_router(teacher_attendance_router)
+app.include_router(teacher_salary_router)
+app.include_router(teacher_document_router)
+app.include_router(teacher_360_router)
+app.include_router(teacher_tasks_router)
+app.include_router(teacher_workspace_router)
 # ---------------------------------------------------------------------------
 # Root
 # ---------------------------------------------------------------------------

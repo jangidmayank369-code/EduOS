@@ -26,7 +26,14 @@ class Student(Base):
         nullable=True,
     )
 
+    section_id: Mapped[int | None] = mapped_column(
+        ForeignKey("sections.id"),
+        nullable=True,
+        index=True,
+    )
+
     school_class = relationship("SchoolClass")
+    section = relationship("SchoolSection")
 
     admission_number: Mapped[str] = mapped_column(
         String(50),

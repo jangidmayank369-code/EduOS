@@ -6,7 +6,7 @@ from app.api.auth import require_role
 from app.models.user import User
 from app.models.student import Student
 from app.models.teacher import Teacher
-from app.models.teacher_assignment import TeacherAssignment
+from app.models.section_subject_teacher import SectionSubjectTeacher
 from app.models.exam import Exam
 from app.models.exam_subject import ExamSubject
 from app.models.mark import Mark
@@ -180,19 +180,28 @@ def validate_teacher_assignment(
     """
     Admin can enter marks for any student/subject.
 
-    Teacher can enter marks only when assigned to:
-        student's class + selected subject.
+    Teacher can enter marks only when the student belongs to a section
+    where that teacher is actively assigned to the selected subject.
+    The section-level assignment is authoritative; the legacy
+    class-level TeacherAssignment table is intentionally not used here.
     """
 
     if teacher is None:
         return
 
+    if student.section_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Student is not assigned to a section",
+        )
+
     assignment = (
-        db.query(TeacherAssignment)
+        db.query(SectionSubjectTeacher)
         .filter(
-            TeacherAssignment.teacher_id == teacher.id,
-            TeacherAssignment.class_id == student.class_id,
-            TeacherAssignment.subject_id == subject_id,
+            SectionSubjectTeacher.teacher_id == teacher.id,
+            SectionSubjectTeacher.section_id == student.section_id,
+            SectionSubjectTeacher.subject_id == subject_id,
+            SectionSubjectTeacher.is_active.is_(True),
         )
         .first()
     )
@@ -201,7 +210,7 @@ def validate_teacher_assignment(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=(
-                "You are not assigned to this student's class "
+                "You are not assigned to this student's section "
                 "and subject"
             ),
         )
@@ -613,11 +622,15 @@ def get_student_marks(
     # TEACHER can see marks only for assigned subjects.
     # ---------------------------------------------------------------
 
+    if student.section_id is None:
+        return []
+
     assignments = (
-        db.query(TeacherAssignment)
+        db.query(SectionSubjectTeacher)
         .filter(
-            TeacherAssignment.teacher_id == teacher.id,
-            TeacherAssignment.class_id == student.class_id,
+            SectionSubjectTeacher.teacher_id == teacher.id,
+            SectionSubjectTeacher.section_id == student.section_id,
+            SectionSubjectTeacher.is_active.is_(True),
         )
         .all()
     )

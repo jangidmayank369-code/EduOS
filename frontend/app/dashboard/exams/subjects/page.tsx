@@ -1,2329 +1,1272 @@
 "use client";
 
-import {
-  FormEvent,
-  Suspense,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
-type Exam = {
+const API_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
+
+type Subject = {
   id: number;
   name: string;
+  code: string;
   description?: string | null;
-  exam_type?: string;
-  academic_year?: string | null;
-  term?: string | null;
-  start_date?: string | null;
-  end_date?: string | null;
-  include_in_result?: boolean;
-  weightage?: number;
-  status?: string;
-  is_active?: boolean;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
+type SubjectForm = {
+  name: string;
+  code: string;
+  description: string;
 };
 
 type SchoolClass = {
   id: number;
   name: string;
-  section?: string | null;
+  description?: string | null;
+  is_active: boolean;
 };
 
-type Subject = {
+type ClassSubject = {
   id: number;
   name: string;
-  code?: string | null;
+  code: string;
+  description?: string | null;
 };
 
-type ExamSubjectComponent = {
-  key: string;
-  name: string;
-  type: string;
-  max_marks: number;
-  pass_marks: number;
-  include_in_result: boolean;
-  is_optional: boolean;
-  display_order: number;
-};
+type ComponentType = "MARKS" | "GRADE" | "REMARK";
 
-type ExamSubject = {
-  exam_id: number;
+type CoScholasticComponent = {
+  id: number;
   class_id: number;
-  subject_id: number;
-  max_marks: number;
-  pass_marks: number;
-  is_optional: boolean;
+  name: string;
+  component_type: ComponentType;
+  max_marks: number | null;
   include_in_result: boolean;
-  components?: ExamSubjectComponent[];
+  display_order: number;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
 };
 
 type ComponentForm = {
-  key: string;
   name: string;
-  type: string;
+  component_type: ComponentType;
   max_marks: string;
-  pass_marks: string;
   include_in_result: boolean;
-  is_optional: boolean;
-};
-
-type FormState = {
+  display_order: string;
   class_id: string;
-  subject_id: string;
-  max_marks: string;
-  pass_marks: string;
-  is_optional: boolean;
-  include_in_result: boolean;
-  components: ComponentForm[];
 };
 
-const API = "http://127.0.0.1:8000";
-
-const COMPONENT_TYPES = [
-  {
-    value: "THEORY",
-    label: "Theory / Written",
-  },
-  {
-    value: "PRACTICAL",
-    label: "Practical",
-  },
-  {
-    value: "ORAL",
-    label: "Oral",
-  },
-  {
-    value: "INTERNAL",
-    label: "Internal",
-  },
-  {
-    value: "PROJECT",
-    label: "Project",
-  },
-  {
-    value: "OTHER",
-    label: "Other",
-  },
-];
-
-const emptyForm: FormState = {
-  class_id: "",
-  subject_id: "",
-  max_marks: "100",
-  pass_marks: "40",
-  is_optional: false,
-  include_in_result: true,
-  components: [],
+type ApiErrorBody = {
+  detail?: string | { msg?: string }[];
+  message?: string;
 };
 
-function createEmptyComponent(
-  displayOrder: number
-): ComponentForm {
-  return {
-    key: `component_${displayOrder}`,
-    name: "",
-    type: "THEORY",
-    max_marks: "",
-    pass_marks: "",
-    include_in_result: true,
-    is_optional: false,
-  };
+function getErrorMessage(body: unknown, fallback: string): string {
+  if (!body || typeof body !== "object") return fallback;
+  const data = body as ApiErrorBody;
+  if (typeof data.detail === "string") return data.detail;
+  if (Array.isArray(data.detail) && data.detail.length > 0) {
+    return data.detail
+      .map((item) => item?.msg || "Validation error")
+      .join(", ");
+  }
+  if (typeof data.message === "string") return data.message;
+  return fallback;
 }
 
-function ExamSubjectsPageContent() {
+export default function SubjectsPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
 
-  const examId = searchParams.get("examId");
-
-  const [exam, setExam] = useState<Exam | null>(null);
-  const [classes, setClasses] = useState<SchoolClass[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [examSubjects, setExamSubjects] = useState<ExamSubject[]>(
-    []
-  );
-
+  const [classes, setClasses] = useState<SchoolClass[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [classesLoading, setClassesLoading] = useState(false);
+
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("active");
+
+  const [showForm, setShowForm] = useState(false);
+  const [editingSubject, setEditingSubject] = useState<Subject | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const [showAssignments, setShowAssignments] = useState(false);
+  const [assignmentSubject, setAssignmentSubject] = useState<Subject | null>(
+    null
+  );
+  const [selectedClassId, setSelectedClassId] = useState("");
+  const [assignedSubjects, setAssignedSubjects] = useState<ClassSubject[]>([]);
+  const [assignmentLoading, setAssignmentLoading] = useState(false);
+
+  const [showComponents, setShowComponents] = useState(false);
+  const [componentSubject, setComponentSubject] = useState<Subject | null>(
+    null
+  );
+  const [componentClassId, setComponentClassId] = useState("");
+  const [components, setComponents] = useState<CoScholasticComponent[]>([]);
+  const [componentLoading, setComponentLoading] = useState(false);
+  const [componentSubmitting, setComponentSubmitting] = useState(false);
+  const [editingComponent, setEditingComponent] =
+    useState<CoScholasticComponent | null>(null);
 
   const [error, setError] = useState("");
-  const [classFilter, setClassFilter] = useState("");
-  const [search, setSearch] = useState("");
+  const [success, setSuccess] = useState("");
 
-  const [showModal, setShowModal] = useState(false);
-  const [editing, setEditing] =
-    useState<ExamSubject | null>(null);
+  const [form, setForm] = useState<SubjectForm>({
+    name: "",
+    code: "",
+    description: "",
+  });
 
-  const [form, setForm] = useState<FormState>(emptyForm);
+  const [componentForm, setComponentForm] = useState<ComponentForm>({
+    name: "",
+    component_type: "GRADE",
+    max_marks: "",
+    include_in_result: false,
+    display_order: "0",
+    class_id: "",
+  });
 
-  const isLocked =
-    exam?.status === "LOCKED" ||
-    exam?.status === "PUBLISHED";
+  const token = () =>
+    typeof window !== "undefined"
+      ? localStorage.getItem("access_token")
+      : null;
 
-  useEffect(() => {
-    if (!examId) {
-      setError("Exam ID missing.");
-      setLoading(false);
-      return;
-    }
+  const logout = useCallback(() => {
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("user_role");
+    router.push("/login");
+  }, [router]);
 
-    loadData();
-  }, [examId]);
+  const request = useCallback(
+    async <T,>(path: string, options?: RequestInit): Promise<T> => {
+      const accessToken = token();
+      const response = await fetch(`${API_URL}${path}`, {
+        ...options,
+        headers: {
+          ...(options?.body ? { "Content-Type": "application/json" } : {}),
+          Authorization: `Bearer ${accessToken ?? ""}`,
+          ...(options?.headers ?? {}),
+        },
+      });
 
-  // ---------------------------------------------------------
-  // AUTHENTICATED API HELPER
-  // ---------------------------------------------------------
-
-  async function request<T>(
-    path: string,
-    options: RequestInit = {}
-  ): Promise<T> {
-    const token = localStorage.getItem("access_token");
-
-    if (!token) {
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("user_role");
-
-      window.location.href = "/login";
-
-      throw new Error("Not authenticated");
-    }
-
-    const response = await fetch(`${API}${path}`, {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-        ...(options.headers || {}),
-      },
-    });
-
-    if (response.status === 401) {
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("user_role");
-
-      window.location.href = "/login";
-
-      throw new Error(
-        "Session expired. Please login again."
-      );
-    }
-
-    if (!response.ok) {
-      let message = `Request failed (${response.status})`;
-
-      try {
-        const data = await response.json();
-
-        if (typeof data?.detail === "string") {
-          message = data.detail;
-        } else if (Array.isArray(data?.detail)) {
-          message = data.detail
-            .map(
-              (item: any) =>
-                item?.msg || "Validation error"
-            )
-            .join(", ");
-        }
-      } catch {
-        // Ignore invalid error body.
+      if (response.status === 401) {
+        logout();
+        throw new Error("Your session has expired. Please sign in again.");
       }
 
-      throw new Error(message);
-    }
+      const text = await response.text();
+      let body: unknown = null;
+      if (text) {
+        try {
+          body = JSON.parse(text) as unknown;
+        } catch {
+          body = null;
+        }
+      }
 
-    if (response.status === 204) {
-      return undefined as T;
-    }
+      if (!response.ok) {
+        throw new Error(
+          getErrorMessage(body, `Request failed with status ${response.status}`)
+        );
+      }
 
-    return response.json();
-  }
+      return (body ?? {}) as T;
+    },
+    [logout]
+  );
 
-  // ---------------------------------------------------------
-  // LOAD DATA
-  // ---------------------------------------------------------
-
-  async function loadData() {
-    if (!examId) return;
-
+  const fetchSubjects = useCallback(async () => {
     setLoading(true);
     setError("");
-
     try {
-      const [
-        examData,
-        classData,
-        subjectData,
-        configData,
-      ] = await Promise.all([
-        request<Exam>(`/exams/${examId}`),
-
-        request<SchoolClass[]>(
-          "/classes"
-        ),
-
-        request<Subject[]>(
-          "/subjects/"
-        ),
-
-        request<ExamSubject[]>(
-          `/exam-subjects/exam/${examId}`
-        ),
-      ]);
-
-      setExam(examData);
-
-      setClasses(
-        Array.isArray(classData)
-          ? classData
-          : []
-      );
-
-      setSubjects(
-        Array.isArray(subjectData)
-          ? subjectData
-          : []
-      );
-
-      setExamSubjects(
-        Array.isArray(configData)
-          ? configData
-          : []
-      );
-    } catch (err: any) {
-      setError(
-        err?.message ||
-          "Failed to load exam subjects."
-      );
+      const data = await request<Subject[]>("/subjects/");
+      setSubjects(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : "Failed to load subjects.");
     } finally {
       setLoading(false);
     }
-  }
+  }, [request]);
 
-  // ---------------------------------------------------------
-  // HELPERS
-  // ---------------------------------------------------------
-
-  function getClassName(classId: number) {
-    const item = classes.find(
-      (c) => c.id === classId
-    );
-
-    if (!item) {
-      return `Class #${classId}`;
-    }
-
-    return item.section
-      ? `${item.name} - ${item.section}`
-      : item.name;
-  }
-
-  function getSubjectName(subjectId: number) {
-    const item = subjects.find(
-      (s) => s.id === subjectId
-    );
-
-    if (!item) {
-      return `Subject #${subjectId}`;
-    }
-
-    return item.code
-      ? `${item.name} (${item.code})`
-      : item.name;
-  }
-
-  function formatDate(value?: string | null) {
-    if (!value) return "—";
-
-    const date = new Date(
-      `${value}T00:00:00`
-    );
-
-    if (Number.isNaN(date.getTime())) {
-      return value;
-    }
-
-    return date.toLocaleDateString(
-      "en-IN",
-      {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      }
-    );
-  }
-
-  function updateForm<K extends keyof FormState>(
-    key: K,
-    value: FormState[K]
-  ) {
-    setForm((previous) => ({
-      ...previous,
-      [key]: value,
-    }));
-  }
-
-  function updateComponent(
-    index: number,
-    key: keyof ComponentForm,
-    value: string | boolean
-  ) {
-    setForm((previous) => ({
-      ...previous,
-      components: previous.components.map(
-        (component, componentIndex) =>
-          componentIndex === index
-            ? {
-                ...component,
-                [key]: value,
-              }
-            : component
-      ),
-    }));
-  }
-
-  function addComponent() {
-    setForm((previous) => ({
-      ...previous,
-      components: [
-        ...previous.components,
-        createEmptyComponent(
-          previous.components.length + 1
-        ),
-      ],
-    }));
-  }
-
-  function removeComponent(index: number) {
-    setForm((previous) => ({
-      ...previous,
-      components: previous.components
-        .filter(
-          (_, componentIndex) =>
-            componentIndex !== index
-        )
-        .map((component, componentIndex) => ({
-          ...component,
-          key:
-            component.key ||
-            `component_${componentIndex + 1}`,
-        })),
-    }));
-  }
-
-  function getComponentTotal() {
-    return form.components.reduce(
-      (total, component) => {
-        const value = Number(
-          component.max_marks
-        );
-
-        return total +
-          (Number.isFinite(value)
-            ? value
-            : 0);
-      },
-      0
-    );
-  }
-
-  // ---------------------------------------------------------
-  // FILTERED DATA
-  // ---------------------------------------------------------
-
-  const filteredRows = useMemo(() => {
-    const query =
-      search.trim().toLowerCase();
-
-    return examSubjects.filter((row) => {
-      if (
-        classFilter &&
-        String(row.class_id) !== classFilter
-      ) {
-        return false;
-      }
-
-      if (!query) {
-        return true;
-      }
-
-      const className =
-        getClassName(
-          row.class_id
-        ).toLowerCase();
-
-      const subjectName =
-        getSubjectName(
-          row.subject_id
-        ).toLowerCase();
-
-      const componentText = (
-        row.components || []
-      )
-        .map(
-          (component) =>
-            `${component.name} ${component.type}`
-        )
-        .join(" ")
-        .toLowerCase();
-
-      return (
-        className.includes(query) ||
-        subjectName.includes(query) ||
-        componentText.includes(query) ||
-        String(
-          row.max_marks
-        ).includes(query) ||
-        String(
-          row.pass_marks
-        ).includes(query)
-      );
-    });
-  }, [
-    examSubjects,
-    classFilter,
-    search,
-    classes,
-    subjects,
-  ]);
-
-  // ---------------------------------------------------------
-  // STATS
-  // ---------------------------------------------------------
-
-  const stats = useMemo(() => {
-    const uniqueClasses =
-      new Set(
-        examSubjects.map(
-          (item) => item.class_id
-        )
-      );
-
-    const optional =
-      examSubjects.filter(
-        (item) =>
-          item.is_optional
-      ).length;
-
-    const included =
-      examSubjects.filter(
-        (item) =>
-          item.include_in_result
-      ).length;
-
-    const configuredComponents =
-      examSubjects.reduce(
-        (total, item) =>
-          total +
-          (item.components?.length || 0),
-        0
-      );
-
-    return {
-      total: examSubjects.length,
-      classes: uniqueClasses.size,
-      optional,
-      included,
-      components: configuredComponents,
-    };
-  }, [examSubjects]);
-
-  // ---------------------------------------------------------
-  // ADD
-  // ---------------------------------------------------------
-
-  function openAddModal() {
-    if (isLocked) {
-      alert(
-        "Locked/Published exam me subject configuration change nahi kar sakte."
-      );
-      return;
-    }
-
-    setEditing(null);
-
-    setForm({
-      ...emptyForm,
-      class_id:
-        classFilter || "",
-      components: [],
-    });
-
-    setError("");
-    setShowModal(true);
-  }
-
-  // ---------------------------------------------------------
-  // EDIT
-  // ---------------------------------------------------------
-
-  function openEditModal(
-    row: ExamSubject
-  ) {
-    if (isLocked) {
-      alert(
-        "Locked/Published exam me subject configuration change nahi kar sakte."
-      );
-      return;
-    }
-
-    setEditing(row);
-
-    setForm({
-      class_id: String(
-        row.class_id
-      ),
-
-      subject_id: String(
-        row.subject_id
-      ),
-
-      max_marks: String(
-        row.max_marks
-      ),
-
-      pass_marks: String(
-        row.pass_marks
-      ),
-
-      is_optional:
-        row.is_optional,
-
-      include_in_result:
-        row.include_in_result,
-
-      components:
-        (row.components || []).map(
-          (component, index) => ({
-            key:
-              component.key ||
-              `component_${index + 1}`,
-
-            name:
-              component.name || "",
-
-            type:
-              component.type ||
-              "THEORY",
-
-            max_marks:
-              String(
-                component.max_marks ??
-                  ""
-              ),
-
-            pass_marks:
-              String(
-                component.pass_marks ??
-                  ""
-              ),
-
-            include_in_result:
-              component.include_in_result !==
-              false,
-
-            is_optional:
-              component.is_optional ===
-              true,
-          })
-        ),
-    });
-
-    setError("");
-    setShowModal(true);
-  }
-
-  // ---------------------------------------------------------
-  // CLOSE MODAL
-  // ---------------------------------------------------------
-
-  function closeModal() {
-    if (saving) return;
-
-    setShowModal(false);
-    setEditing(null);
-    setForm(emptyForm);
-  }
-
-  // ---------------------------------------------------------
-  // VALIDATE COMPONENTS
-  // ---------------------------------------------------------
-
-  function validateComponents(
-    maxMarks: number
-  ): string | null {
-    if (form.components.length === 0) {
-      return null;
-    }
-
-    const keys = new Set<string>();
-
-    let total = 0;
-
-    for (
-      let index = 0;
-      index < form.components.length;
-      index++
-    ) {
-      const component =
-        form.components[index];
-
-      const name =
-        component.name.trim();
-
-      if (!name) {
-        return `Component ${index + 1}: name is required.`;
-      }
-
-      const key =
-        component.key.trim();
-
-      if (!key) {
-        return `Component ${index + 1}: key is required.`;
-      }
-
-      if (keys.has(key)) {
-        return `Duplicate component key: ${key}`;
-      }
-
-      keys.add(key);
-
-      const componentMax =
-        Number(
-          component.max_marks
-        );
-
-      const componentPass =
-        Number(
-          component.pass_marks
-        );
-
-      if (
-        !Number.isFinite(
-          componentMax
-        ) ||
-        componentMax <= 0
-      ) {
-        return `${name}: max marks must be greater than zero.`;
-      }
-
-      if (
-        !Number.isFinite(
-          componentPass
-        ) ||
-        componentPass < 0
-      ) {
-        return `${name}: pass marks are invalid.`;
-      }
-
-      if (
-        componentPass >
-        componentMax
-      ) {
-        return `${name}: pass marks cannot exceed max marks.`;
-      }
-
-      total += componentMax;
-    }
-
-    if (
-      Math.abs(
-        total - maxMarks
-      ) > 0.0001
-    ) {
-      return (
-        `Component total (${total}) must equal ` +
-        `subject max marks (${maxMarks}).`
-      );
-    }
-
-    return null;
-  }
-
-  // ---------------------------------------------------------
-  // SAVE
-  // ---------------------------------------------------------
-
-  async function handleSubmit(
-    event: FormEvent
-  ) {
-    event.preventDefault();
-
-    if (!examId) return;
-
-    if (isLocked) {
-      alert(
-        "This exam is locked/published."
-      );
-      return;
-    }
-
-    const classId =
-      Number(form.class_id);
-
-    const subjectId =
-      Number(form.subject_id);
-
-    const maxMarks =
-      Number(form.max_marks);
-
-    const passMarks =
-      Number(form.pass_marks);
-
-    if (!classId || !subjectId) {
-      alert(
-        "Class aur Subject select karo."
-      );
-      return;
-    }
-
-    if (
-      !Number.isFinite(maxMarks) ||
-      maxMarks <= 0
-    ) {
-      alert(
-        "Max marks valid hona chahiye."
-      );
-      return;
-    }
-
-    if (
-      !Number.isFinite(passMarks) ||
-      passMarks < 0
-    ) {
-      alert(
-        "Pass marks valid hona chahiye."
-      );
-      return;
-    }
-
-    if (
-      passMarks > maxMarks
-    ) {
-      alert(
-        "Pass marks max marks se zyada nahi ho sakte."
-      );
-      return;
-    }
-
-    const componentError =
-      validateComponents(
-        maxMarks
-      );
-
-    if (componentError) {
-      alert(componentError);
-      return;
-    }
-
-    if (!editing) {
-      const duplicate =
-        examSubjects.some(
-          (row) =>
-            row.class_id ===
-              classId &&
-            row.subject_id ===
-              subjectId
-        );
-
-      if (duplicate) {
-        alert(
-          "Ye subject is class ke liye already configured hai."
-        );
-        return;
-      }
-    }
-
-    const components =
-      form.components.map(
-        (component, index) => ({
-          key:
-            component.key.trim(),
-
-          name:
-            component.name.trim(),
-
-          type:
-            component.type,
-
-          max_marks:
-            Number(
-              component.max_marks
-            ),
-
-          pass_marks:
-            Number(
-              component.pass_marks
-            ),
-
-          include_in_result:
-            component.include_in_result,
-
-          is_optional:
-            component.is_optional,
-
-          display_order:
-            index + 1,
-        })
-      );
-
-    setSaving(true);
-    setError("");
-
+  const fetchClasses = useCallback(async () => {
+    setClassesLoading(true);
     try {
-      if (editing) {
-        await request(
-          `/exam-subjects/${editing.exam_id}/${editing.class_id}/${editing.subject_id}`,
-          {
-            method: "PUT",
-
-            body: JSON.stringify({
-              max_marks:
-                maxMarks,
-
-              pass_marks:
-                passMarks,
-
-              is_optional:
-                form.is_optional,
-
-              include_in_result:
-                form.include_in_result,
-
-              components,
-            }),
-          }
-        );
-      } else {
-        await request(
-          "/exam-subjects/",
-          {
-            method: "POST",
-
-            body: JSON.stringify({
-              exam_id:
-                Number(examId),
-
-              class_id:
-                classId,
-
-              subject_id:
-                subjectId,
-
-              max_marks:
-                maxMarks,
-
-              pass_marks:
-                passMarks,
-
-              is_optional:
-                form.is_optional,
-
-              include_in_result:
-                form.include_in_result,
-
-              components,
-            }),
-          }
-        );
-      }
-
-      closeModal();
-
-      await loadData();
-    } catch (err: any) {
+      const data = await request<SchoolClass[]>("/classes/");
+      setClasses(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error(err);
       setError(
-        err?.message ||
-          "Failed to save subject configuration."
+        err instanceof Error ? err.message : "Failed to load classes."
       );
     } finally {
-      setSaving(false);
+      setClassesLoading(false);
     }
-  }
+  }, [request]);
 
-  // ---------------------------------------------------------
-  // DELETE
-  // ---------------------------------------------------------
+  useEffect(() => {
+    const accessToken = token();
+    if (!accessToken) {
+      router.push("/login");
+      return;
+    }
+    void fetchSubjects();
+    void fetchClasses();
+  }, [fetchClasses, fetchSubjects, router]);
 
-  async function handleDelete(
-    row: ExamSubject
-  ) {
-    if (isLocked) {
-      alert(
-        "Locked/Published exam me subject configuration delete nahi kar sakte."
-      );
+  const activeSubjects = subjects.filter((subject) => subject.is_active).length;
+  const inactiveSubjects = subjects.length - activeSubjects;
+
+  const filteredSubjects = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return subjects.filter((subject) => {
+      const matchesSearch =
+        !query ||
+        subject.name.toLowerCase().includes(query) ||
+        subject.code.toLowerCase().includes(query) ||
+        (subject.description ?? "").toLowerCase().includes(query);
+
+      const matchesStatus =
+        statusFilter === "all" ||
+        (statusFilter === "active" && subject.is_active) ||
+        (statusFilter === "inactive" && !subject.is_active);
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [subjects, search, statusFilter]);
+
+  const resetSubjectForm = () => {
+    setForm({ name: "", code: "", description: "" });
+    setEditingSubject(null);
+  };
+
+  const openCreate = () => {
+    setError("");
+    setSuccess("");
+    resetSubjectForm();
+    setShowForm(true);
+  };
+
+  const openEdit = (subject: Subject) => {
+    setError("");
+    setSuccess("");
+    setEditingSubject(subject);
+    setForm({
+      name: subject.name,
+      code: subject.code,
+      description: subject.description ?? "",
+    });
+    setShowForm(true);
+  };
+
+  const handleSubjectSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = form.name.trim();
+    const code = form.code.trim().toUpperCase();
+
+    if (!name || !code) {
+      setError("Subject name and code are required.");
       return;
     }
 
-    const confirmed =
-      window.confirm(
-        `Remove "${getSubjectName(
-          row.subject_id
-        )}" from ${getClassName(
-          row.class_id
-        )}?`
-      );
+    setSubmitting(true);
+    setError("");
+    setSuccess("");
 
-    if (!confirmed) {
+    try {
+      if (editingSubject) {
+        await request<Subject>(`/subjects/${editingSubject.id}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            name,
+            code,
+            description: form.description.trim() || null,
+          }),
+        });
+        setSuccess("Subject updated successfully.");
+      } else {
+        await request<Subject>("/subjects/", {
+          method: "POST",
+          body: JSON.stringify({
+            name,
+            code,
+            description: form.description.trim() || null,
+          }),
+        });
+        setSuccess("Subject added successfully.");
+      }
+
+      setShowForm(false);
+      resetSubjectForm();
+      await fetchSubjects();
+    } catch (err) {
+      console.error(err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : editingSubject
+            ? "Failed to update subject."
+            : "Failed to add subject."
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const deactivateSubject = async (subject: Subject) => {
+    if (
+      !window.confirm(
+        `Deactivate "${subject.name}"? It will no longer appear in the active catalog.`
+      )
+    ) {
       return;
     }
 
     setError("");
+    setSuccess("");
+
+    try {
+      await request<Subject>(`/subjects/${subject.id}`, { method: "DELETE" });
+      setSuccess(`"${subject.name}" was deactivated.`);
+      await fetchSubjects();
+    } catch (err) {
+      console.error(err);
+      setError(
+        err instanceof Error ? err.message : "Failed to deactivate subject."
+      );
+    }
+  };
+
+  const openAssignments = async (subject: Subject) => {
+    setAssignmentSubject(subject);
+    setSelectedClassId("");
+    setAssignedSubjects([]);
+    setShowAssignments(true);
+    setError("");
+    if (classes.length === 0) await fetchClasses();
+  };
+
+  const loadAssignedSubjects = async (classId: string) => {
+    if (!assignmentSubject || !classId) {
+      setAssignedSubjects([]);
+      return;
+    }
+
+    setAssignmentLoading(true);
+    setError("");
+    try {
+      const data = await request<ClassSubject[]>(
+        `/classes/${classId}/subjects`
+      );
+      setAssignedSubjects(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error(err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to load class subjects."
+      );
+    } finally {
+      setAssignmentLoading(false);
+    }
+  };
+
+  const assignSubject = async () => {
+    if (!assignmentSubject || !selectedClassId) {
+      setError("Select a class first.");
+      return;
+    }
+
+    setAssignmentLoading(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      await request(`/classes/${selectedClassId}/subjects/${assignmentSubject.id}`, {
+        method: "POST",
+      });
+      setSuccess(
+        `"${assignmentSubject.name}" assigned to the selected class.`
+      );
+      await loadAssignedSubjects(selectedClassId);
+    } catch (err) {
+      console.error(err);
+      setError(
+        err instanceof Error ? err.message : "Failed to assign subject."
+      );
+    } finally {
+      setAssignmentLoading(false);
+    }
+  };
+
+  const removeAssignment = async (subject: ClassSubject) => {
+    if (!selectedClassId) return;
+    if (
+      !window.confirm(
+        `Remove "${subject.name}" from this class?`
+      )
+    ) {
+      return;
+    }
+
+    setAssignmentLoading(true);
+    setError("");
+    setSuccess("");
 
     try {
       await request(
-        `/exam-subjects/${row.exam_id}/${row.class_id}/${row.subject_id}`,
-        {
-          method: "DELETE",
-        }
+        `/classes/${selectedClassId}/subjects/${subject.id}`,
+        { method: "DELETE" }
       );
-
-      await loadData();
-    } catch (err: any) {
+      setSuccess(`"${subject.name}" removed from the class.`);
+      await loadAssignedSubjects(selectedClassId);
+    } catch (err) {
+      console.error(err);
       setError(
-        err?.message ||
-          "Failed to delete configuration."
+        err instanceof Error ? err.message : "Failed to remove assignment."
       );
+    } finally {
+      setAssignmentLoading(false);
     }
-  }
+  };
 
-  // ---------------------------------------------------------
-  // MISSING EXAM ID
-  // ---------------------------------------------------------
+  const openComponents = async (subject: Subject) => {
+    setComponentSubject(subject);
+    setComponents([]);
+    setEditingComponent(null);
+    setComponentForm({
+      name: "",
+      component_type: "GRADE",
+      max_marks: "",
+      include_in_result: false,
+      display_order: "0",
+      class_id: "",
+    });
+    setComponentClassId("");
+    setShowComponents(true);
+    setError("");
+    if (classes.length === 0) await fetchClasses();
+  };
 
-  if (!examId) {
-    return (
-      <main className="min-h-screen bg-slate-50 p-6">
-        <div className="mx-auto max-w-5xl rounded-2xl border border-red-200 bg-white p-8 text-center shadow-sm">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-red-100 text-2xl">
-            !
-          </div>
+  const loadComponents = async (classId: string) => {
+    if (!componentSubject || !classId) {
+      setComponents([]);
+      return;
+    }
 
-          <h1 className="text-xl font-bold text-slate-900">
-            Exam ID missing
-          </h1>
+    setComponentLoading(true);
+    setError("");
+    try {
+      const data = await request<CoScholasticComponent[]>(
+        `/subjects/${componentSubject.id}/co-scholastic/components?class_id=${classId}`
+      );
+      setComponents(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error(err);
+      setError(
+        err instanceof Error ? err.message : "Failed to load components."
+      );
+    } finally {
+      setComponentLoading(false);
+    }
+  };
 
-          <p className="mt-2 text-sm text-slate-500">
-            Exam Master se kisi exam ka
-            Subjects page open karo.
-          </p>
+  const resetComponentForm = () => {
+    setEditingComponent(null);
+    setComponentForm({
+      name: "",
+      component_type: "GRADE",
+      max_marks: "",
+      include_in_result: false,
+      display_order: "0",
+      class_id: componentClassId,
+    });
+  };
 
-          <button
-            onClick={() =>
-              router.push(
-                "/dashboard/exams"
-              )
-            }
-            className="mt-6 rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
-          >
-            Back to Exams
-          </button>
-        </div>
-      </main>
-    );
-  }
+  const editComponent = (component: CoScholasticComponent) => {
+    setEditingComponent(component);
+    setComponentForm({
+      name: component.name,
+      component_type: component.component_type,
+      max_marks:
+        component.max_marks === null ? "" : String(component.max_marks),
+      include_in_result: component.include_in_result,
+      display_order: String(component.display_order),
+      class_id: String(component.class_id),
+    });
+  };
 
-  // ---------------------------------------------------------
-  // MAIN UI
-  // ---------------------------------------------------------
+  const submitComponent = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!componentSubject || !componentClassId) {
+      setError("Select a class first.");
+      return;
+    }
+
+    if (!componentForm.name.trim()) {
+      setError("Component name is required.");
+      return;
+    }
+
+    const maxMarks =
+      componentForm.max_marks.trim() === ""
+        ? null
+        : Number(componentForm.max_marks);
+
+    const displayOrder = Number(componentForm.display_order);
+
+    if (maxMarks !== null && (!Number.isFinite(maxMarks) || maxMarks < 0)) {
+      setError("Maximum marks must be a valid non-negative number.");
+      return;
+    }
+
+    if (!Number.isInteger(displayOrder) || displayOrder < 0) {
+      setError("Display order must be a non-negative whole number.");
+      return;
+    }
+
+    setComponentSubmitting(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      if (editingComponent) {
+        await request<CoScholasticComponent>(
+          `/subjects/${componentSubject.id}/co-scholastic/components/${editingComponent.id}`,
+          {
+            method: "PUT",
+            body: JSON.stringify({
+              name: componentForm.name.trim(),
+              component_type: componentForm.component_type,
+              max_marks: maxMarks,
+              include_in_result: componentForm.include_in_result,
+              display_order: displayOrder,
+            }),
+          }
+        );
+        setSuccess("Co-scholastic component updated.");
+      } else {
+        await request<CoScholasticComponent>(
+          `/subjects/${componentSubject.id}/co-scholastic/components`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              name: componentForm.name.trim(),
+              component_type: componentForm.component_type,
+              max_marks: maxMarks,
+              include_in_result: componentForm.include_in_result,
+              display_order: displayOrder,
+              class_id: Number(componentClassId),
+            }),
+          }
+        );
+        setSuccess("Co-scholastic component created.");
+      }
+
+      resetComponentForm();
+      await loadComponents(componentClassId);
+    } catch (err) {
+      console.error(err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to save co-scholastic component."
+      );
+    } finally {
+      setComponentSubmitting(false);
+    }
+  };
+
+  const deactivateComponent = async (component: CoScholasticComponent) => {
+    if (!componentSubject) return;
+    if (!window.confirm(`Deactivate "${component.name}"?`)) return;
+
+    setComponentLoading(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      await request(
+        `/subjects/${componentSubject.id}/co-scholastic/components/${component.id}`,
+        { method: "DELETE" }
+      );
+      setSuccess(`"${component.name}" was deactivated.`);
+      await loadComponents(componentClassId);
+    } catch (err) {
+      console.error(err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to deactivate component."
+      );
+    } finally {
+      setComponentLoading(false);
+    }
+  };
 
   return (
-    <main className="min-h-screen bg-slate-50">
-      <div className="mx-auto max-w-[1500px] p-4 sm:p-6 lg:p-8">
-
-        {/* HEADER */}
-
-        <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <div className="min-h-screen bg-[#f5f7fb] text-slate-900">
+      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
+        <div className="flex min-h-[76px] items-center justify-between px-6 py-4 lg:px-8">
           <div>
-            <div className="mb-2 flex flex-wrap items-center gap-2 text-sm text-slate-500">
-              <button
-                onClick={() =>
-                  router.push(
-                    "/dashboard/exams"
-                  )
-                }
-                className="hover:text-slate-900"
-              >
-                Exams
-              </button>
-
-              <span>/</span>
-
-              <span className="font-medium text-slate-700">
-                Subjects
-              </span>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-                Exam Subjects
-              </h1>
-
-              {exam && (
-                <span
-                  className={`rounded-full px-3 py-1 text-xs font-bold ${
-                    exam.status ===
-                    "PUBLISHED"
-                      ? "bg-emerald-100 text-emerald-700"
-                      : exam.status ===
-                        "LOCKED"
-                      ? "bg-red-100 text-red-700"
-                      : exam.status ===
-                        "ACTIVE"
-                      ? "bg-blue-100 text-blue-700"
-                      : "bg-amber-100 text-amber-700"
-                  }`}
-                >
-                  {exam.status ||
-                    "DRAFT"}
-                </span>
-              )}
-            </div>
-
-            <p className="mt-1 text-sm text-slate-500">
-              Class-wise subject configuration for{" "}
-              <span className="font-semibold text-slate-700">
-                {exam?.name ||
-                  "selected exam"}
-              </span>
+            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#315b9b]">
+              EduOS · Academic Management
+            </p>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight text-[#102a56]">
+              Subjects
+            </h1>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Manage subjects, class assignments and co-scholastic configuration
             </p>
           </div>
-
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() =>
-                router.push(
-                  `/dashboard/exams/timetable?examId=${examId}`
-                )
-              }
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
-            >
-              🗓 Timetable
-            </button>
-
-            <button
-              onClick={() =>
-                router.push(
-                  `/dashboard/marks?examId=${examId}`
-                )
-              }
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
-            >
-              ✍ Marks
-            </button>
-
-            <button
-              onClick={
-                openAddModal
-              }
-              disabled={isLocked}
-              className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              + Add Subject
-            </button>
-          </div>
+          <button
+            onClick={openCreate}
+            className="flex items-center gap-2 rounded-xl bg-[#102a56] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#183d73]"
+          >
+            <span className="text-lg leading-none">+</span>
+            Add Subject
+          </button>
         </div>
+      </header>
 
-        {/* LOCK NOTICE */}
-
-        {isLocked && (
-          <div className="mb-6 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4">
-            <div className="text-xl">
-              🔒
-            </div>
-
-            <div>
-              <p className="font-semibold text-red-800">
-                Exam is{" "}
-                {exam?.status}
-              </p>
-
-              <p className="mt-1 text-sm text-red-700">
-                Subject configuration is
-                read-only while the exam
-                is locked or published.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* ERROR */}
-
-        {error && (
-          <div className="mb-6 flex items-start justify-between gap-4 rounded-2xl border border-red-200 bg-red-50 p-4">
-            <div>
-              <p className="font-semibold text-red-800">
-                Something went wrong
-              </p>
-
-              <p className="mt-1 text-sm text-red-700">
-                {error}
-              </p>
-            </div>
-
+      <main className="px-6 py-7 lg:px-8">
+        <div className="mx-auto max-w-[1500px]">
+          <div className="mb-6 flex items-center gap-2 text-xs text-slate-400">
             <button
-              onClick={() =>
-                setError("")
-              }
-              className="text-red-500 hover:text-red-700"
+              onClick={() => router.push("/dashboard")}
+              className="transition hover:text-[#315b9b]"
             >
-              ✕
+              Dashboard
             </button>
+            <span>›</span>
+            <span className="font-medium text-slate-600">Subjects</span>
           </div>
-        )}
 
-        {/* Quick summary */}
-        <div className="mb-5 flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-          <SummaryChip label="Subjects" value={String(stats.total)} />
-          <SummaryChip label="Classes" value={String(stats.classes)} />
-          <SummaryChip label="Optional" value={String(stats.optional)} />
-          <SummaryChip label="In Result" value={String(stats.included)} />
-          <SummaryChip label="Components" value={String(stats.components)} />
-        </div>
+          {success && (
+            <Alert
+              tone="success"
+              message={success}
+              onClose={() => setSuccess("")}
+            />
+          )}
+          {error && (
+            <Alert
+              tone="error"
+              message={error}
+              onClose={() => setError("")}
+            />
+          )}
 
-        {/* Exam context */}
-        {exam && (
-          <div className="mb-5 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Exam</p>
-              <p className="text-sm font-bold text-slate-800">{exam.name}</p>
-            </div>
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Type</p>
-              <p className="text-sm font-semibold text-slate-700">{exam.exam_type || "—"}</p>
-            </div>
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Year</p>
-              <p className="text-sm font-semibold text-slate-700">{exam.academic_year || "—"}</p>
-            </div>
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Term</p>
-              <p className="text-sm font-semibold text-slate-700">{exam.term || "—"}</p>
-            </div>
-            <div className="sm:ml-auto">
-              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Exam Dates</p>
-              <p className="text-sm font-semibold text-slate-700">
-                {exam.start_date
-                  ? exam.end_date
-                    ? `${formatDate(exam.start_date)} - ${formatDate(exam.end_date)}`
-                    : formatDate(exam.start_date)
-                  : "—"}
-              </p>
-            </div>
-          </div>
-        )}
+          <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <OverviewCard
+              title="Total Subjects"
+              value={subjects.length}
+              description="Active catalog returned by API"
+              icon="◆"
+            />
+            <OverviewCard
+              title="Active Subjects"
+              value={activeSubjects}
+              description="Currently active"
+              icon="✓"
+              green
+            />
+            <OverviewCard
+              title="Inactive Subjects"
+              value={inactiveSubjects}
+              description="Inactive records known locally"
+              icon="—"
+              red
+            />
+          </section>
 
-        {/* FILTERS */}
-
-        <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-          <div className="grid gap-2 lg:grid-cols-[210px_1fr_auto]">
-            <select
-              value={
-                classFilter
-              }
-              onChange={(e) =>
-                setClassFilter(
-                  e.target.value
-                )
-              }
-              className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-slate-400"
-            >
-              <option value="">
-                All Classes
-              </option>
-
-              {classes.map(
-                (item) => (
-                  <option
-                    key={item.id}
-                    value={
-                      item.id
-                    }
+          <section className="mt-7 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 p-5 lg:p-6">
+              <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#315b9b]">
+                    Academic Catalog
+                  </p>
+                  <h2 className="mt-1 text-xl font-bold text-[#102a56]">
+                    Subject Directory
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Create, edit, deactivate and configure academic subjects.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <div className="relative">
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                      ⌕
+                    </span>
+                    <input
+                      type="text"
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      placeholder="Search subjects..."
+                      className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-4 text-sm outline-none transition focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100 sm:w-64"
+                    />
+                  </div>
+                  <select
+                    value={statusFilter}
+                    onChange={(event) => setStatusFilter(event.target.value)}
+                    className="h-11 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-600 outline-none focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
                   >
-                    {item.section
-                      ? `${item.name} - ${item.section}`
-                      : item.name}
-                  </option>
-                )
-              )}
-            </select>
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                    <option value="all">All Status</option>
+                  </select>
+                </div>
+              </div>
+            </div>
 
-            <input
-              value={search}
-              onChange={(e) =>
-                setSearch(
-                  e.target.value
-                )
-              }
-              placeholder="Search class, subject, component, marks..."
-              className="rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-slate-400"
-            />
-
-            <button
-              onClick={() => {
-                setSearch("");
-                setClassFilter(
-                  ""
-                );
-              }}
-              className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
-            >
-              Reset
-            </button>
-          </div>
-        </div>
-
-        {/* TABLE */}
-
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          {loading ? (
-            <LoadingState />
-          ) : filteredRows.length ===
-            0 ? (
-            <EmptyState
-              onAdd={
-                openAddModal
-              }
-              disabled={
-                Boolean(
-                  isLocked
-                )
-              }
-            />
-          ) : (
-            <>
-              {/* DESKTOP */}
-
-              <div className="hidden overflow-x-auto lg:block">
-                <table className="w-full min-w-[1100px]">
+            <div className="overflow-x-auto">
+              {loading ? (
+                <LoadingTable />
+              ) : filteredSubjects.length === 0 ? (
+                <EmptyState search={search} onAdd={openCreate} />
+              ) : (
+                <table className="min-w-[1250px] w-full">
                   <thead>
-                    <tr className="border-b border-slate-200 bg-slate-50 text-left">
-                      <th className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500">
-                        Class
-                      </th>
-
-                      <th className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500">
-                        Subject
-                      </th>
-
-                      <th className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500">
-                        Components
-                      </th>
-
-                      <th className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500">
-                        Max
-                      </th>
-
-                      <th className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500">
-                        Pass
-                      </th>
-
-                      <th className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500">
-                        Optional
-                      </th>
-
-                      <th className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500">
-                        Result
-                      </th>
-
-                      <th className="px-5 py-4 text-right text-xs font-bold uppercase tracking-wide text-slate-500">
-                        Actions
-                      </th>
+                    <tr className="border-b border-slate-100 bg-slate-50/80 text-left">
+                      {[
+                        "Subject",
+                        "Code",
+                        "Description",
+                        "Status",
+                        "Created",
+                        "Actions",
+                      ].map((heading) => (
+                        <th
+                          key={heading}
+                          className="px-6 py-4 text-[11px] font-bold uppercase tracking-wider text-slate-400"
+                        >
+                          {heading}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
-
                   <tbody>
-                    {filteredRows.map(
-                      (row) => (
+                    {filteredSubjects.map((subject) => {
+                      const initials =
+                        subject.name
+                          .split(" ")
+                          .map((word) => word[0] ?? "")
+                          .join("")
+                          .slice(0, 2)
+                          .toUpperCase() || "SU";
+
+                      return (
                         <tr
-                          key={`${row.exam_id}-${row.class_id}-${row.subject_id}`}
-                          className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
+                          key={subject.id}
+                          className="group border-b border-slate-100 transition hover:bg-blue-50/30"
                         >
-                          <td className="px-5 py-4">
-                            <div className="font-semibold text-slate-900">
-                              {getClassName(
-                                row.class_id
-                              )}
-                            </div>
-                          </td>
-
-                          <td className="px-5 py-4">
-                            <div className="font-medium text-slate-900">
-                              {getSubjectName(
-                                row.subject_id
-                              )}
-                            </div>
-                          </td>
-
-                          <td className="px-5 py-4">
-                            {row.components &&
-                            row.components.length >
-                              0 ? (
-                              <div className="flex max-w-[330px] flex-wrap gap-1.5">
-                                {row.components.map(
-                                  (
-                                    component
-                                  ) => (
-                                    <span
-                                      key={
-                                        component.key
-                                      }
-                                      className="rounded-lg bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700"
-                                    >
-                                      {
-                                        component.name
-                                      }{" "}
-                                      {
-                                        component.max_marks
-                                      }
-                                    </span>
-                                  )
-                                )}
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#102a56] text-xs font-bold text-white">
+                                {initials}
                               </div>
-                            ) : (
-                              <span className="text-xs text-slate-400">
-                                No components
-                              </span>
-                            )}
+                              <div>
+                                <p className="font-semibold text-slate-800">
+                                  {subject.name}
+                                </p>
+                                <p className="mt-0.5 text-xs text-slate-400">
+                                  Subject ID #{subject.id}
+                                </p>
+                              </div>
+                            </div>
                           </td>
-
-                          <td className="px-5 py-4">
-                            <span className="font-semibold text-slate-700">
-                              {
-                                row.max_marks
-                              }
+                          <td className="px-6 py-4">
+                            <span className="rounded-lg bg-blue-50 px-2.5 py-1.5 text-xs font-bold tracking-wide text-blue-700">
+                              {subject.code}
                             </span>
                           </td>
-
-                          <td className="px-5 py-4">
-                            <span className="font-semibold text-slate-700">
-                              {
-                                row.pass_marks
-                              }
-                            </span>
+                          <td className="max-w-[320px] px-6 py-4">
+                            <p className="truncate text-sm text-slate-600">
+                              {subject.description || "No description provided"}
+                            </p>
                           </td>
-
-                          <td className="px-5 py-4">
-                            {row.is_optional ? (
-                              <Badge
-                                text="Optional"
-                                className="bg-amber-100 text-amber-700"
-                              />
-                            ) : (
-                              <span className="text-sm text-slate-400">
-                                No
-                              </span>
-                            )}
+                          <td className="px-6 py-4">
+                            <StatusBadge active={subject.is_active} />
                           </td>
-
-                          <td className="px-5 py-4">
-                            {row.include_in_result ? (
-                              <Badge
-                                text="Included"
-                                className="bg-emerald-100 text-emerald-700"
-                              />
-                            ) : (
-                              <Badge
-                                text="Excluded"
-                                className="bg-slate-100 text-slate-500"
-                              />
-                            )}
-                          </td>
-
-                          <td className="px-5 py-4">
-                            <div className="flex justify-end gap-2">
-                              <button
-                                onClick={() =>
-                                  openEditModal(
-                                    row
+                          <td className="px-6 py-4">
+                            <p className="text-sm font-medium text-slate-600">
+                              {subject.created_at
+                                ? new Date(subject.created_at).toLocaleDateString(
+                                    "en-IN",
+                                    {
+                                      day: "2-digit",
+                                      month: "short",
+                                      year: "numeric",
+                                    }
                                   )
-                                }
-                                disabled={
-                                  isLocked
-                                }
-                                className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
-                              >
-                                Edit
-                              </button>
-
-                              <button
-                                onClick={() =>
-                                  handleDelete(
-                                    row
-                                  )
-                                }
-                                disabled={
-                                  isLocked
-                                }
-                                className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
-                              >
-                                Delete
-                              </button>
+                                : "—"}
+                            </p>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex flex-wrap justify-end gap-2">
+                              <ActionButton
+                                label="Edit"
+                                onClick={() => openEdit(subject)}
+                              />
+                              <ActionButton
+                                label="Classes"
+                                onClick={() => void openAssignments(subject)}
+                              />
+                              <ActionButton
+                                label="Co-Scholastic"
+                                onClick={() => void openComponents(subject)}
+                              />
+                              {subject.is_active && (
+                                <ActionButton
+                                  label="Deactivate"
+                                  danger
+                                  onClick={() => void deactivateSubject(subject)}
+                                />
+                              )}
                             </div>
                           </td>
                         </tr>
-                      )
-                    )}
+                      );
+                    })}
                   </tbody>
                 </table>
-              </div>
-
-              {/* MOBILE */}
-
-              <div className="divide-y divide-slate-100 lg:hidden">
-                {filteredRows.map(
-                  (row) => (
-                    <div
-                      key={`${row.exam_id}-${row.class_id}-${row.subject_id}`}
-                      className="p-4"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                            {getClassName(
-                              row.class_id
-                            )}
-                          </p>
-
-                          <h3 className="mt-1 font-bold text-slate-900">
-                            {getSubjectName(
-                              row.subject_id
-                            )}
-                          </h3>
-                        </div>
-
-                        {row.is_optional && (
-                          <Badge
-                            text="Optional"
-                            className="bg-amber-100 text-amber-700"
-                          />
-                        )}
-                      </div>
-
-                      {row.components &&
-                        row.components.length >
-                          0 && (
-                          <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3">
-                            <p className="text-[11px] font-bold uppercase tracking-wide text-blue-500">
-                              Components
-                            </p>
-
-                            <div className="mt-2 space-y-1.5">
-                              {row.components.map(
-                                (
-                                  component
-                                ) => (
-                                  <div
-                                    key={
-                                      component.key
-                                    }
-                                    className="flex items-center justify-between text-sm"
-                                  >
-                                    <span className="font-medium text-blue-900">
-                                      {
-                                        component.name
-                                      }
-                                    </span>
-
-                                    <span className="font-bold text-blue-700">
-                                      {
-                                        component.max_marks
-                                      }
-                                    </span>
-                                  </div>
-                                )
-                              )}
-                            </div>
-                          </div>
-                        )}
-
-                      <div className="mt-4 grid grid-cols-2 gap-3">
-                        <MiniInfo
-                          label="Max Marks"
-                          value={String(
-                            row.max_marks
-                          )}
-                        />
-
-                        <MiniInfo
-                          label="Pass Marks"
-                          value={String(
-                            row.pass_marks
-                          )}
-                        />
-                      </div>
-
-                      <div className="mt-4 flex items-center justify-between gap-3">
-                        {row.include_in_result ? (
-                          <Badge
-                            text="Included in Result"
-                            className="bg-emerald-100 text-emerald-700"
-                          />
-                        ) : (
-                          <Badge
-                            text="Excluded from Result"
-                            className="bg-slate-100 text-slate-500"
-                          />
-                        )}
-
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() =>
-                              openEditModal(
-                                row
-                              )
-                            }
-                            disabled={
-                              isLocked
-                            }
-                            className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-40"
-                          >
-                            Edit
-                          </button>
-
-                          <button
-                            onClick={() =>
-                              handleDelete(
-                                row
-                              )
-                            }
-                            disabled={
-                              isLocked
-                            }
-                            className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 disabled:opacity-40"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                )}
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-          <span>
-            Showing{" "}
-            {
-              filteredRows.length
-            }{" "}
-            of{" "}
-            {
-              examSubjects.length
-            }{" "}
-            configurations
-          </span>
-
-          <span>•</span>
-
-          <span>
-            Component total must equal
-            subject maximum marks.
-          </span>
-        </div>
-      </div>
-
-      {/* MODAL */}
-
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/50 p-4">
-          <div className="my-6 w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl">
-
-            {/* MODAL HEADER */}
-
-            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-              <div>
-                <h2 className="text-lg font-bold text-slate-900">
-                  {editing
-                    ? "Edit Subject Configuration"
-                    : "Add Exam Subject"}
-                </h2>
-
-                <p className="mt-1 text-xs text-slate-500">
-                  Configure marks, components
-                  and result behaviour.
-                </p>
-              </div>
-
-              <button
-                onClick={
-                  closeModal
-                }
-                disabled={saving}
-                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-              >
-                ✕
-              </button>
+              )}
             </div>
 
-            <form
-              onSubmit={
-                handleSubmit
-              }
-            >
-              <div className="max-h-[75vh] space-y-6 overflow-y-auto p-5">
-
-                {/* CLASS */}
-
-                <div>
-                  <label className="mb-2 block text-sm font-semibold text-slate-700">
-                    Class *
-                  </label>
-
-                  <select
-                    value={
-                      form.class_id
-                    }
-                    onChange={(e) =>
-                      updateForm(
-                        "class_id",
-                        e.target.value
-                      )
-                    }
-                    disabled={
-                      Boolean(
-                        editing
-                      )
-                    }
-                    className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-slate-400 disabled:bg-slate-100"
-                    required
-                  >
-                    <option value="">
-                      Select Class
-                    </option>
-
-                    {classes.map(
-                      (item) => (
-                        <option
-                          key={
-                            item.id
-                          }
-                          value={
-                            item.id
-                          }
-                        >
-                          {item.section
-                            ? `${item.name} - ${item.section}`
-                            : item.name}
-                        </option>
-                      )
-                    )}
-                  </select>
-
-                  {editing && (
-                    <p className="mt-1 text-xs text-slate-400">
-                      Class cannot be
-                      changed while
-                      editing.
-                    </p>
-                  )}
-                </div>
-
-                {/* SUBJECT */}
-
-                <div>
-                  <label className="mb-2 block text-sm font-semibold text-slate-700">
-                    Subject *
-                  </label>
-
-                  <select
-                    value={
-                      form.subject_id
-                    }
-                    onChange={(e) =>
-                      updateForm(
-                        "subject_id",
-                        e.target.value
-                      )
-                    }
-                    disabled={
-                      Boolean(
-                        editing
-                      )
-                    }
-                    className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-slate-400 disabled:bg-slate-100"
-                    required
-                  >
-                    <option value="">
-                      Select Subject
-                    </option>
-
-                    {subjects.map(
-                      (item) => (
-                        <option
-                          key={
-                            item.id
-                          }
-                          value={
-                            item.id
-                          }
-                        >
-                          {item.code
-                            ? `${item.name} (${item.code})`
-                            : item.name}
-                        </option>
-                      )
-                    )}
-                  </select>
-
-                  {editing && (
-                    <p className="mt-1 text-xs text-slate-400">
-                      Subject cannot be
-                      changed while
-                      editing.
-                    </p>
-                  )}
-                </div>
-
-                {/* SUBJECT MARKS */}
-
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="mb-4">
-                    <h3 className="font-bold text-slate-900">
-                      Subject Marks
-                    </h3>
-
-                    <p className="mt-1 text-xs text-slate-500">
-                      Overall maximum and
-                      passing marks for this
-                      subject.
-                    </p>
-                  </div>
-
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div>
-                      <label className="mb-2 block text-sm font-semibold text-slate-700">
-                        Maximum Marks *
-                      </label>
-
-                      <input
-                        type="number"
-                        min="1"
-                        step="0.01"
-                        value={
-                          form.max_marks
-                        }
-                        onChange={(e) =>
-                          updateForm(
-                            "max_marks",
-                            e.target.value
-                          )
-                        }
-                        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-slate-400"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="mb-2 block text-sm font-semibold text-slate-700">
-                        Pass Marks *
-                      </label>
-
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={
-                          form.pass_marks
-                        }
-                        onChange={(e) =>
-                          updateForm(
-                            "pass_marks",
-                            e.target.value
-                          )
-                        }
-                        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-slate-400"
-                        required
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* COMPONENTS */}
-
-                <div className="rounded-2xl border border-blue-200 bg-blue-50/50 p-4">
-                  <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <h3 className="font-bold text-slate-900">
-                        Exam Components
-                      </h3>
-
-                      <p className="mt-1 text-xs text-slate-500">
-                        Example: Written 70 +
-                        Oral 30 = 100.
-                      </p>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={
-                        addComponent
-                      }
-                      className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
-                    >
-                      + Add Component
-                    </button>
-                  </div>
-
-                  {form.components.length ===
-                  0 ? (
-                    <div className="rounded-xl border border-dashed border-blue-200 bg-white p-5 text-center">
-                      <p className="text-sm font-semibold text-slate-700">
-                        No components configured
-                      </p>
-
-                      <p className="mt-1 text-xs text-slate-500">
-                        You can keep this
-                        subject as a single
-                        total-mark subject,
-                        or add Written,
-                        Oral, Practical,
-                        Internal, etc.
-                      </p>
-
-                      <button
-                        type="button"
-                        onClick={
-                          addComponent
-                        }
-                        className="mt-3 text-sm font-bold text-blue-600 hover:text-blue-700"
-                      >
-                        + Add first component
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {form.components.map(
-                        (
-                          component,
-                          index
-                        ) => (
-                          <div
-                            key={`${index}-${component.key}`}
-                            className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
-                          >
-                            <div className="mb-3 flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-100 text-xs font-bold text-blue-700">
-                                  {index +
-                                    1}
-                                </span>
-
-                                <span className="text-sm font-bold text-slate-800">
-                                  Component
-                                </span>
-                              </div>
-
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  removeComponent(
-                                    index
-                                  )
-                                }
-                                className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50"
-                              >
-                                Remove
-                              </button>
-                            </div>
-
-                            <div className="grid gap-3 md:grid-cols-2">
-                              <div>
-                                <label className="mb-1.5 block text-xs font-semibold text-slate-600">
-                                  Component Name *
-                                </label>
-
-                                <input
-                                  value={
-                                    component.name
-                                  }
-                                  onChange={(
-                                    e
-                                  ) =>
-                                    updateComponent(
-                                      index,
-                                      "name",
-                                      e.target
-                                        .value
-                                    )
-                                  }
-                                  placeholder="e.g. Written"
-                                  className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400"
-                                  required
-                                />
-                              </div>
-
-                              <div>
-                                <label className="mb-1.5 block text-xs font-semibold text-slate-600">
-                                  Component Type
-                                </label>
-
-                                <select
-                                  value={
-                                    component.type
-                                  }
-                                  onChange={(
-                                    e
-                                  ) =>
-                                    updateComponent(
-                                      index,
-                                      "type",
-                                      e.target
-                                        .value
-                                    )
-                                  }
-                                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-400"
-                                >
-                                  {COMPONENT_TYPES.map(
-                                    (
-                                      type
-                                    ) => (
-                                      <option
-                                        key={
-                                          type.value
-                                        }
-                                        value={
-                                          type.value
-                                        }
-                                      >
-                                        {
-                                          type.label
-                                        }
-                                      </option>
-                                    )
-                                  )}
-                                </select>
-                              </div>
-
-                              <div>
-                                <label className="mb-1.5 block text-xs font-semibold text-slate-600">
-                                  Max Marks *
-                                </label>
-
-                                <input
-                                  type="number"
-                                  min="0.01"
-                                  step="0.01"
-                                  value={
-                                    component.max_marks
-                                  }
-                                  onChange={(
-                                    e
-                                  ) =>
-                                    updateComponent(
-                                      index,
-                                      "max_marks",
-                                      e.target
-                                        .value
-                                    )
-                                  }
-                                  placeholder="70"
-                                  className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400"
-                                  required
-                                />
-                              </div>
-
-                              <div>
-                                <label className="mb-1.5 block text-xs font-semibold text-slate-600">
-                                  Pass Marks *
-                                </label>
-
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={
-                                    component.pass_marks
-                                  }
-                                  onChange={(
-                                    e
-                                  ) =>
-                                    updateComponent(
-                                      index,
-                                      "pass_marks",
-                                      e.target
-                                        .value
-                                    )
-                                  }
-                                  placeholder="28"
-                                  className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400"
-                                  required
-                                />
-                              </div>
-                            </div>
-
-                            <div className="mt-3 flex flex-wrap gap-4 border-t border-slate-100 pt-3">
-                              <label className="flex cursor-pointer items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  checked={
-                                    component.include_in_result
-                                  }
-                                  onChange={(
-                                    e
-                                  ) =>
-                                    updateComponent(
-                                      index,
-                                      "include_in_result",
-                                      e.target
-                                        .checked
-                                    )
-                                  }
-                                  className="h-4 w-4 rounded border-slate-300"
-                                />
-
-                                <span className="text-xs font-semibold text-slate-700">
-                                  Include in Result
-                                </span>
-                              </label>
-
-                              <label className="flex cursor-pointer items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  checked={
-                                    component.is_optional
-                                  }
-                                  onChange={(
-                                    e
-                                  ) =>
-                                    updateComponent(
-                                      index,
-                                      "is_optional",
-                                      e.target
-                                        .checked
-                                    )
-                                  }
-                                  className="h-4 w-4 rounded border-slate-300"
-                                />
-
-                                <span className="text-xs font-semibold text-slate-700">
-                                  Optional Component
-                                </span>
-                              </label>
-                            </div>
-                          </div>
-                        )
-                      )}
-                    </div>
-                  )}
-
-                  {form.components.length >
-                    0 && (
-                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                      <MiniInfo
-                        label="Component Total"
-                        value={`${getComponentTotal()} marks`}
-                      />
-
-                      <MiniInfo
-                        label="Subject Maximum"
-                        value={`${form.max_marks || 0} marks`}
-                      />
-
-                      <div
-                        className={`rounded-xl p-3 ${
-                          Math.abs(
-                            getComponentTotal() -
-                              Number(
-                                form.max_marks ||
-                                  0
-                              )
-                          ) <
-                          0.0001
-                            ? "bg-emerald-50"
-                            : "bg-red-50"
-                        }`}
-                      >
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                          Configuration
-                        </p>
-
-                        <p
-                          className={`mt-1 text-sm font-bold ${
-                            Math.abs(
-                              getComponentTotal() -
-                                Number(
-                                  form.max_marks ||
-                                    0
-                                )
-                            ) <
-                            0.0001
-                              ? "text-emerald-700"
-                              : "text-red-700"
-                          }`}
-                        >
-                          {Math.abs(
-                            getComponentTotal() -
-                              Number(
-                                form.max_marks ||
-                                  0
-                              )
-                          ) <
-                          0.0001
-                            ? "✓ Total Matches"
-                            : "⚠ Total Must Match"}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* OPTIONS */}
-
-                <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <label className="flex cursor-pointer items-start gap-3">
-                    <input
-                      type="checkbox"
-                      checked={
-                        form.is_optional
-                      }
-                      onChange={(e) =>
-                        updateForm(
-                          "is_optional",
-                          e.target.checked
-                        )
-                      }
-                      className="mt-1 h-4 w-4 rounded border-slate-300"
-                    />
-
-                    <span>
-                      <span className="block text-sm font-semibold text-slate-800">
-                        Optional Subject
-                      </span>
-
-                      <span className="mt-0.5 block text-xs text-slate-500">
-                        Student may not be
-                        required to take
-                        this subject.
-                      </span>
-                    </span>
-                  </label>
-
-                  <label className="flex cursor-pointer items-start gap-3">
-                    <input
-                      type="checkbox"
-                      checked={
-                        form.include_in_result
-                      }
-                      onChange={(e) =>
-                        updateForm(
-                          "include_in_result",
-                          e.target.checked
-                        )
-                      }
-                      className="mt-1 h-4 w-4 rounded border-slate-300"
-                    />
-
-                    <span>
-                      <span className="block text-sm font-semibold text-slate-800">
-                        Include in Result
-                      </span>
-
-                      <span className="mt-0.5 block text-xs text-slate-500">
-                        Include this subject
-                        in result
-                        calculation.
-                      </span>
-                    </span>
-                  </label>
-                </div>
+            {!loading && filteredSubjects.length > 0 && (
+              <div className="flex flex-col gap-2 border-t border-slate-100 bg-slate-50/50 px-6 py-4 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
+                <span>
+                  Showing{" "}
+                  <strong className="text-slate-600">
+                    {filteredSubjects.length}
+                  </strong>{" "}
+                  of{" "}
+                  <strong className="text-slate-600">{subjects.length}</strong>{" "}
+                  subjects
+                </span>
+                <span>EduOS Academic Catalog</span>
               </div>
+            )}
+          </section>
+        </div>
+      </main>
 
-              {/* FOOTER */}
+      {showForm && (
+        <Modal
+          title={editingSubject ? "Edit Subject" : "Add New Subject"}
+          subtitle={
+            editingSubject
+              ? "Update the subject details."
+              : "Create a subject for the academic catalog."
+          }
+          onClose={() => {
+            setShowForm(false);
+            resetSubjectForm();
+          }}
+        >
+          <form onSubmit={handleSubjectSubmit} className="space-y-5">
+            <Field
+              label="Subject Name"
+              required
+              value={form.name}
+              placeholder="e.g. Mathematics"
+              onChange={(value) => setForm((p) => ({ ...p, name: value }))}
+            />
+            <Field
+              label="Subject Code"
+              required
+              value={form.code}
+              placeholder="e.g. MATH"
+              onChange={(value) =>
+                setForm((p) => ({ ...p, code: value.toUpperCase() }))
+              }
+            />
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-slate-600">
+                Description
+              </label>
+              <textarea
+                rows={4}
+                value={form.description}
+                onChange={(event) =>
+                  setForm((p) => ({ ...p, description: event.target.value }))
+                }
+                className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm outline-none focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
+                placeholder="Optional description"
+              />
+            </div>
+            <div className="flex justify-end gap-3 border-t border-slate-100 pt-5">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowForm(false);
+                  resetSubjectForm();
+                }}
+                className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="rounded-xl bg-[#102a56] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {submitting
+                  ? editingSubject
+                    ? "Saving..."
+                    : "Creating..."
+                  : editingSubject
+                    ? "Save Changes"
+                    : "Create Subject"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
 
-              <div className="flex justify-end gap-3 border-t border-slate-200 bg-slate-50 px-5 py-4">
+      {showAssignments && assignmentSubject && (
+        <Modal
+          title={`Class Assignment · ${assignmentSubject.name}`}
+          subtitle="Assign this subject to active classes or remove an existing assignment."
+          wide
+          onClose={() => {
+            setShowAssignments(false);
+            setAssignmentSubject(null);
+          }}
+        >
+          <div className="space-y-5">
+            <SelectField
+              label="Class"
+              value={selectedClassId}
+              disabled={classesLoading}
+              onChange={(value) => {
+                setSelectedClassId(value);
+                void loadAssignedSubjects(value);
+              }}
+              options={classes.map((item) => ({
+                value: String(item.id),
+                label: item.name,
+              }))}
+              placeholder={classesLoading ? "Loading classes..." : "Select class"}
+            />
+
+            {selectedClassId && (
+              <div className="flex items-center justify-between rounded-2xl border border-blue-100 bg-blue-50 p-4">
+                <div>
+                  <p className="text-sm font-semibold text-[#102a56]">
+                    Assign subject
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Add {assignmentSubject.code} to the selected class.
+                  </p>
+                </div>
                 <button
                   type="button"
-                  onClick={
-                    closeModal
-                  }
-                  disabled={saving}
-                  className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                  onClick={() => void assignSubject()}
+                  disabled={assignmentLoading}
+                  className="rounded-xl bg-[#102a56] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
                 >
-                  Cancel
+                  Assign
                 </button>
+              </div>
+            )}
 
+            <div>
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-bold text-[#102a56]">
+                  Assigned Subjects
+                </h3>
+                {assignmentLoading && (
+                  <span className="text-xs text-slate-400">Loading...</span>
+                )}
+              </div>
+
+              {!selectedClassId ? (
+                <EmptyMini text="Select a class to view its subjects." />
+              ) : assignedSubjects.length === 0 ? (
+                <EmptyMini text="No subjects are assigned to this class." />
+              ) : (
+                <div className="space-y-2">
+                  {assignedSubjects.map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between rounded-xl border border-slate-200 p-3"
+                    >
+                      <div>
+                        <p className="text-sm font-semibold text-slate-800">
+                          {item.name}
+                        </p>
+                        <p className="text-xs text-slate-400">{item.code}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void removeAssignment(item)}
+                        disabled={assignmentLoading}
+                        className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {showComponents && componentSubject && (
+        <Modal
+          title={`Co-Scholastic · ${componentSubject.name}`}
+          subtitle="Configure class-based co-scholastic components from the Subjects module."
+          wide
+          onClose={() => {
+            setShowComponents(false);
+            setComponentSubject(null);
+            setEditingComponent(null);
+          }}
+        >
+          <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+            <form onSubmit={submitComponent} className="space-y-4">
+              <SelectField
+                label="Class"
+                value={componentClassId}
+                disabled={classesLoading}
+                onChange={(value) => {
+                  setComponentClassId(value);
+                  setComponentForm((p) => ({ ...p, class_id: value }));
+                  void loadComponents(value);
+                }}
+                options={classes.map((item) => ({
+                  value: String(item.id),
+                  label: item.name,
+                }))}
+                placeholder={classesLoading ? "Loading classes..." : "Select class"}
+              />
+
+              <Field
+                label="Component Name"
+                required
+                value={componentForm.name}
+                placeholder="e.g. Art & Craft"
+                onChange={(value) =>
+                  setComponentForm((p) => ({ ...p, name: value }))
+                }
+              />
+
+              <SelectField
+                label="Component Type"
+                value={componentForm.component_type}
+                onChange={(value) =>
+                  setComponentForm((p) => ({
+                    ...p,
+                    component_type: value as ComponentType,
+                  }))
+                }
+                options={[
+                  { value: "MARKS", label: "Marks" },
+                  { value: "GRADE", label: "Grade" },
+                  { value: "REMARK", label: "Remark" },
+                ]}
+              />
+
+              <div className="grid grid-cols-2 gap-3">
+                <Field
+                  label="Max Marks"
+                  value={componentForm.max_marks}
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="Optional"
+                  onChange={(value) =>
+                    setComponentForm((p) => ({ ...p, max_marks: value }))
+                  }
+                />
+                <Field
+                  label="Display Order"
+                  value={componentForm.display_order}
+                  type="number"
+                  min="0"
+                  step="1"
+                  onChange={(value) =>
+                    setComponentForm((p) => ({
+                      ...p,
+                      display_order: value,
+                    }))
+                  }
+                />
+              </div>
+
+              <label className="flex items-center gap-3 rounded-xl border border-slate-200 p-3 text-sm">
+                <input
+                  type="checkbox"
+                  checked={componentForm.include_in_result}
+                  onChange={(event) =>
+                    setComponentForm((p) => ({
+                      ...p,
+                      include_in_result: event.target.checked,
+                    }))
+                  }
+                />
+                <span className="font-medium text-slate-700">
+                  Include in result
+                </span>
+              </label>
+
+              <div className="flex gap-2 border-t border-slate-100 pt-4">
+                {editingComponent && (
+                  <button
+                    type="button"
+                    onClick={resetComponentForm}
+                    className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600"
+                  >
+                    Cancel Edit
+                  </button>
+                )}
                 <button
                   type="submit"
-                  disabled={
-                    saving ||
-                    Boolean(
-                      isLocked
-                    )
-                  }
-                  className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={componentSubmitting || !componentClassId}
+                  className="rounded-xl bg-[#102a56] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
                 >
-                  {saving
+                  {componentSubmitting
                     ? "Saving..."
-                    : editing
-                    ? "Update Configuration"
-                    : "Add Subject"}
+                    : editingComponent
+                      ? "Update Component"
+                      : "Add Component"}
                 </button>
               </div>
             </form>
+
+            <div>
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-bold text-[#102a56]">
+                  Components
+                </h3>
+                {componentLoading && (
+                  <span className="text-xs text-slate-400">Loading...</span>
+                )}
+              </div>
+
+              {!componentClassId ? (
+                <EmptyMini text="Select a class to load its components." />
+              ) : components.length === 0 ? (
+                <EmptyMini text="No active co-scholastic components found." />
+              ) : (
+                <div className="space-y-2">
+                  {components.map((component) => (
+                    <div
+                      key={component.id}
+                      className="rounded-xl border border-slate-200 p-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800">
+                            {component.name}
+                          </p>
+                          <p className="mt-0.5 text-xs text-slate-400">
+                            {component.component_type}
+                            {component.max_marks !== null
+                              ? ` · Max ${component.max_marks}`
+                              : ""}
+                            {component.include_in_result
+                              ? " · Included in result"
+                              : ""}
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => editComponent(component)}
+                            className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void deactivateComponent(component)}
+                            className="rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50"
+                          >
+                            Deactivate
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        </Modal>
       )}
-    </main>
-  );
-}
-
-
-export default function ExamSubjectsPage() {
-  return (
-    <Suspense fallback={<LoadingState />}>
-      <ExamSubjectsPageContent />
-    </Suspense>
-  );
-}
-
-
-// ---------------------------------------------------------
-// UI COMPONENTS
-// ---------------------------------------------------------
-
-function SummaryChip({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
-      <span className="text-xs font-semibold text-slate-400">{label}</span>
-      <span className="text-sm font-black text-slate-800">{value}</span>
     </div>
   );
 }
 
-function StatCard({
-  label,
-  value,
-  icon,
+function Alert({
+  tone,
+  message,
+  onClose,
 }: {
-  label: string;
-  value: number;
-  icon: string;
+  tone: "success" | "error";
+  message: string;
+  onClose: () => void;
 }) {
+  const success = tone === "success";
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex items-center justify-between">
+    <div
+      className={`mb-5 flex items-center justify-between rounded-2xl border px-5 py-3 text-sm font-medium ${
+        success
+          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+          : "border-red-200 bg-red-50 text-red-700"
+      }`}
+    >
+      <span>{message}</span>
+      <button onClick={onClose} className="ml-4 text-lg opacity-60">
+        ×
+      </button>
+    </div>
+  );
+}
+
+function OverviewCard({
+  title,
+  value,
+  description,
+  icon,
+  green = false,
+  red = false,
+}: {
+  title: string;
+  value: number;
+  description: string;
+  icon: string;
+  green?: boolean;
+  red?: boolean;
+}) {
+  const iconClass = green
+    ? "bg-emerald-50 text-emerald-700"
+    : red
+      ? "bg-red-50 text-red-700"
+      : "bg-slate-100 text-slate-700";
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-slate-50" />
+      <div className="relative flex items-center justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-            {label}
-          </p>
-
-          <p className="mt-1 text-2xl font-bold text-slate-900">
-            {value}
-          </p>
+          <p className="text-sm font-medium text-slate-500">{title}</p>
+          <p className="mt-2 text-3xl font-bold text-[#102a56]">{value}</p>
+          <p className="mt-1 text-xs text-slate-400">{description}</p>
         </div>
-
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-lg">
+        <div
+          className={`flex h-11 w-11 items-center justify-center rounded-xl text-lg font-bold ${iconClass}`}
+        >
           {icon}
         </div>
       </div>
@@ -2331,104 +1274,215 @@ function StatCard({
   );
 }
 
-function InfoItem({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div>
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-        {label}
-      </p>
-
-      <p className="mt-1 truncate text-sm font-semibold text-slate-800">
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function MiniInfo({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-xl bg-slate-50 p-3">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-        {label}
-      </p>
-
-      <p className="mt-1 text-sm font-bold text-slate-800">
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function Badge({
-  text,
-  className,
-}: {
-  text: string;
-  className: string;
-}) {
-  return (
-    <span
-      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${className}`}
-    >
-      {text}
+function StatusBadge({ active }: { active: boolean }) {
+  return active ? (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
+      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+      Active
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-500">
+      <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+      Inactive
     </span>
   );
 }
 
-function LoadingState() {
+function ActionButton({
+  label,
+  onClick,
+  danger = false,
+}: {
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+}) {
   return (
-    <div className="p-10 text-center">
-      <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-slate-800" />
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${
+        danger
+          ? "border-red-200 text-red-600 hover:bg-red-50"
+          : "border-slate-200 text-slate-600 hover:bg-slate-50"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
 
-      <p className="text-sm font-medium text-slate-600">
-        Loading subject configuration...
-      </p>
+function Field({
+  label,
+  value,
+  onChange,
+  placeholder,
+  required = false,
+  type = "text",
+  min,
+  step,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  required?: boolean;
+  type?: string;
+  min?: string;
+  step?: string;
+}) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-semibold text-slate-600">
+        {label}
+        {required && <span className="ml-1 text-red-500">*</span>}
+      </label>
+      <input
+        type={type}
+        min={min}
+        step={step}
+        required={required}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none transition focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
+      />
+    </div>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+  placeholder = "Select...",
+  disabled = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+  placeholder?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-semibold text-slate-600">
+        {label}
+      </label>
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100 disabled:opacity-60"
+      >
+        <option value="">{placeholder}</option>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function Modal({
+  title,
+  subtitle,
+  children,
+  onClose,
+  wide = false,
+}: {
+  title: string;
+  subtitle: string;
+  children: React.ReactNode;
+  onClose: () => void;
+  wide?: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
+      <div
+        className={`max-h-[92vh] w-full overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl ${
+          wide ? "max-w-5xl" : "max-w-xl"
+        }`}
+      >
+        <div className="mb-6 flex items-start justify-between gap-4 border-b border-slate-100 pb-5">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#315b9b]">
+              Academic Management
+            </p>
+            <h2 className="mt-1 text-xl font-bold text-[#102a56]">{title}</h2>
+            <p className="mt-1 text-xs text-slate-400">{subtitle}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 hover:bg-slate-200"
+          >
+            ×
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function LoadingTable() {
+  return (
+    <div className="space-y-4 p-6">
+      {[1, 2, 3, 4].map((item) => (
+        <div key={item} className="flex animate-pulse items-center gap-4">
+          <div className="h-11 w-11 rounded-xl bg-slate-200" />
+          <div className="flex-1 space-y-2">
+            <div className="h-3 w-40 rounded bg-slate-200" />
+            <div className="h-2 w-28 rounded bg-slate-100" />
+          </div>
+          <div className="hidden h-8 w-20 rounded bg-slate-100 md:block" />
+        </div>
+      ))}
     </div>
   );
 }
 
 function EmptyState({
+  search,
   onAdd,
-  disabled,
 }: {
+  search: string;
   onAdd: () => void;
-  disabled: boolean;
 }) {
   return (
-    <div className="p-10 text-center sm:p-16">
-      <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-3xl">
-        📚
+    <div className="flex flex-col items-center justify-center px-6 py-20 text-center">
+      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-2xl text-[#102a56]">
+        ◆
       </div>
-
-      <h3 className="text-lg font-bold text-slate-900">
-        No subjects configured
+      <h3 className="mt-5 text-lg font-bold text-[#102a56]">
+        {search ? "No subjects found" : "No subjects yet"}
       </h3>
-
-      <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
-        Add subjects class-wise with
-        maximum marks, pass marks,
-        components and result settings.
+      <p className="mt-2 max-w-sm text-sm leading-6 text-slate-500">
+        {search
+          ? "Try changing your search or status filter."
+          : "Start building your academic catalog by adding the first subject."}
       </p>
+      {!search && (
+        <button
+          onClick={onAdd}
+          className="mt-5 rounded-xl bg-[#102a56] px-5 py-2.5 text-sm font-semibold text-white"
+        >
+          + Add Subject
+        </button>
+      )}
+    </div>
+  );
+}
 
-      <button
-        onClick={onAdd}
-        disabled={disabled}
-        className="mt-6 rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        + Add First Subject
-      </button>
+function EmptyMini({ text }: { text: string }) {
+  return (
+    <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400">
+      {text}
     </div>
   );
 }

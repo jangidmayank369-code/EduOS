@@ -21,8 +21,8 @@ const menuItems = [
     icon: "♧",
   },
   {
-    label: "Teachers",
-    path: "/dashboard/teachers",
+    label: "Teacher",
+    path: "/dashboard/teacher",
     icon: "♟",
   },
 
@@ -48,9 +48,8 @@ const menuItems = [
     icon: "◇",
   },
   {
-    label: "Class Subjects",
-    path: "/dashboard/class-subjects",
-    icon: "◇",
+  label: "Teacher Tasks",
+  path: "/dashboard/teacher-tasks",
   },
   {
     label: "Teacher Assignments",
